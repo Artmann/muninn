@@ -142,7 +142,7 @@ index.
 
 | HTTP | code                   | when                                          |
 |------|------------------------|-----------------------------------------------|
-| 400  | `validation`           | missing/invalid field, bad uuid, bad timestamp |
+| 400  | `validation`           | missing/invalid field, bad uuid, bad timestamp, timestamp > 5 min in the future |
 | 400  | `recall-range-invalid` | `occurredFrom > occurredTo`                   |
 | 400  | `budget-conflict`      | both `level` and `maxTokens`                  |
 | 400  | `batch-too-large`      | more than 100 items                           |

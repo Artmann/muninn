@@ -15,8 +15,27 @@ pub struct NewDatapoint {
     pub audience: Option<String>,
 }
 
+/// How far ahead of the server clock a `timestamp` may be. Recall only sees
+/// datapoints at or before its `queryTimestamp` (default now), so a future
+/// datapoint would be silently invisible until then.
+pub const MAX_CLOCK_SKEW: chrono::Duration = chrono::Duration::minutes(5);
+
 impl NewDatapoint {
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_at(Utc::now())
+    }
+
+    pub fn validate_at(&self, now: DateTime<Utc>) -> Result<(), String> {
+        if let Some(ts) = self.timestamp
+            && ts > now + MAX_CLOCK_SKEW
+        {
+            return Err(format!(
+                "timestamp {} is in the future; at most {} minutes ahead of server time ({}) is allowed",
+                ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                MAX_CLOCK_SKEW.num_minutes(),
+                now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            ));
+        }
         if self.label.trim().is_empty() {
             return Err("label must not be empty".into());
         }
@@ -92,6 +111,19 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use uuid::Uuid;
+
+    #[test]
+    fn future_timestamp_beyond_skew_is_rejected() {
+        let now: DateTime<Utc> = "2026-10-18T12:00:00Z".parse().unwrap();
+        let mut d = base();
+        d.timestamp = Some(now + chrono::Duration::minutes(5));
+        assert!(d.validate_at(now).is_ok(), "within allowed skew");
+        d.timestamp = Some(now + chrono::Duration::minutes(5) + chrono::Duration::seconds(1));
+        let err = d.validate_at(now).unwrap_err();
+        assert!(err.contains("future"), "{err}");
+        d.timestamp = Some(now - chrono::Duration::days(365));
+        assert!(d.validate_at(now).is_ok(), "past is fine");
+    }
 
     fn base() -> NewDatapoint {
         NewDatapoint {

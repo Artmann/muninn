@@ -41,6 +41,7 @@ cargo test                                # unit tests, no S3 or model needed
 set -a; . ./.env.example; set +a
 cargo test -- --ignored                   # integration tests against LocalStack
 cargo test --test ingest -- --ignored     # one suite: store, ingest, recall, boot, real_model
+cargo test --test e2e -- --ignored        # end to end: the real binary over HTTP
 ```
 
 Unit tests cover the recall selection algorithm, embedding input
@@ -49,6 +50,17 @@ tests need LocalStack running; each test gets its own fresh bucket. They
 exercise the S3 store, ingest and dedupe, recall, and index rebuild.
 `real_model` loads the real `multilingual-e5-small` model (downloading it
 on first run) and checks a Swedish passage matches an English query.
+
+The `e2e` suite starts the real `muninn` binary on a random port, with the
+real model and a fresh bucket, and talks to it over HTTP. It checks that
+realistic English and Swedish queries find the right memory in their top
+three, and covers restart, time filters, budget, sort and batch retries.
+Server logs go to `target/e2e-logs/`. `e2e_model_switch` is kept separate
+because it downloads a second model (`bge-small-en-v1.5`, about 130 MB);
+run it with `cargo test --test e2e_model_switch -- --ignored`.
+
+If `cargo run` is holding `target/debug/muninn.exe` on Windows, the build
+can't replace it; stop the server or use `CARGO_TARGET_DIR=target/e2e`.
 
 ## Docker
 
