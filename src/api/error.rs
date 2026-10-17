@@ -24,6 +24,8 @@ pub enum ApiError {
     BudgetConflict,
     #[error("a batch holds at most 100 items")]
     BatchTooLarge,
+    #[error("request body is larger than 10 MiB")]
+    PayloadTooLarge,
     #[error("index is still loading from storage")]
     Loading,
     #[error("internal error")]
@@ -37,6 +39,7 @@ impl ApiError {
             ApiError::RecallRangeInvalid => "recall-range-invalid",
             ApiError::BudgetConflict => "budget-conflict",
             ApiError::BatchTooLarge => "batch-too-large",
+            ApiError::PayloadTooLarge => "payload-too-large",
             ApiError::Loading => "loading",
             ApiError::Internal(_) => "internal",
         }
@@ -49,6 +52,7 @@ impl ApiError {
             | ApiError::RecallRangeInvalid
             | ApiError::BudgetConflict
             | ApiError::BatchTooLarge => StatusCode::BAD_REQUEST,
+            ApiError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ApiError::Loading => StatusCode::SERVICE_UNAVAILABLE,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -74,6 +78,9 @@ impl IntoResponse for ApiError {
 
 impl From<JsonRejection> for ApiError {
     fn from(r: JsonRejection) -> Self {
+        if r.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            return ApiError::PayloadTooLarge;
+        }
         ApiError::Validation(r.body_text())
     }
 }

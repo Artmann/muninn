@@ -216,3 +216,35 @@ async fn recall_errors() {
     let (status, _) = recall(&app, json!({ "projectId": p, "query": "q" })).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }
+
+#[tokio::test]
+#[ignore]
+async fn recall_skips_datapoint_with_missing_content() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let kept = ingest(
+        &app,
+        json!({ "projectId": p, "label": "kept", "content": "shared words" }),
+    )
+    .await;
+    // An orphan: meta.json and an index entry, but no content object.
+    let mut orphan = state
+        .store
+        .get_meta(p, kept["id"].as_str().unwrap().parse().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    orphan.id = Uuid::now_v7();
+    orphan.label = "orphan".into();
+    state.store.put_meta(&orphan).await.unwrap();
+    state
+        .index
+        .upsert(p, orphan.id, orphan.embedding.vector.clone())
+        .await
+        .unwrap();
+
+    let (status, body) = recall(&app, json!({ "projectId": p, "query": "shared words" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(labels(&body), vec!["kept"]);
+    assert_eq!(body["usedTokens"], body["results"][0]["contentTokens"]);
+}

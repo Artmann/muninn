@@ -88,7 +88,8 @@ All requests and responses are JSON. Errors look like
 `projectId`, `label` and `content` are required. `timestamp` defaults to
 now, `metadata` to `{}`. Returns `201` with the stored datapoint, or `200`
 with `"deduplicated": true` if the idempotency key was seen before in this
-project. The server assigns the `id`.
+project. The server assigns the `id`. An empty `idempotencyKey` is rejected; omit the
+field instead.
 
 ### `POST /api/v1/ingest/batch`
 

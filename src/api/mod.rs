@@ -5,9 +5,8 @@ pub mod recall;
 pub mod state;
 
 use axum::Router;
-use axum::extract::{FromRequest, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, State};
 use axum::routing::{get, post};
-use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 
 pub use error::ApiError;
@@ -35,7 +34,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ingest", post(ingest::handler))
         .route("/api/v1/ingest/batch", post(ingest::batch_handler))
         .route("/api/v1/recall", post(recall::handler))
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

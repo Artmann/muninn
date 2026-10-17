@@ -146,6 +146,7 @@ index.
 | 400  | `recall-range-invalid` | `occurredFrom > occurredTo`                   |
 | 400  | `budget-conflict`      | both `level` and `maxTokens`                  |
 | 400  | `batch-too-large`      | more than 100 items                           |
+| 413  | `payload-too-large`    | request body over 10 MiB                      |
 | 503  | `loading`              | index not yet rebuilt from S3                 |
 | 500  | `internal`             | S3 or model failure; details in logs only     |
 

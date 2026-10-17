@@ -97,3 +97,23 @@ async fn healthz_reports_loading_then_ok() {
     let (_, body) = common::get(&app, "/healthz").await;
     assert_eq!(body["status"], "ok");
 }
+
+#[tokio::test]
+#[ignore]
+async fn rebuild_skips_unparseable_meta() {
+    let (store, bucket) = common::store_with_bucket().await;
+    let (p, good) = (common::project(), Uuid::now_v7());
+    store.put_content(p, good, "fine").await.unwrap();
+    store.put_meta(&old_meta(p, good)).await.unwrap();
+    common::put_raw(
+        &bucket,
+        &muninn::store::keys::meta(p, Uuid::now_v7()),
+        b"{not json",
+    )
+    .await;
+
+    let index = MemoryIndex::new();
+    let n = rebuild_index(&store, &index, fake()).await.unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(index.len(p), 1);
+}

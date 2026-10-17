@@ -244,12 +244,26 @@ impl S3Store {
                 }
             }
         }
-        let metas: Vec<Option<Meta>> = futures::stream::iter(found)
-            .map(|(project, id)| self.get_meta(project, id))
+        let raw: Vec<(String, Option<Vec<u8>>)> = futures::stream::iter(found)
+            .map(|(project, id)| async move {
+                let key = keys::meta(project, id);
+                self.get(&key).await.map(|bytes| (key, bytes))
+            })
             .buffer_unordered(16)
             .try_collect()
             .await?;
-        Ok(metas.into_iter().flatten().collect())
+        // A corrupt object is skipped rather than failing startup, which
+        // would crash-loop until someone fixed the bucket by hand.
+        Ok(raw
+            .into_iter()
+            .filter_map(|(key, bytes)| match serde_json::from_slice(&bytes?) {
+                Ok(meta) => Some(meta),
+                Err(e) => {
+                    tracing::warn!(key, error = %e, "unparseable meta.json; skipping");
+                    None
+                }
+            })
+            .collect())
     }
 }
 

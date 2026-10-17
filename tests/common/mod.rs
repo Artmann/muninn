@@ -20,15 +20,35 @@ use uuid::Uuid;
 /// A store on a fresh bucket, configured from the environment
 /// (`AWS_ENDPOINT_URL` pointing at LocalStack for local runs).
 pub async fn store() -> S3Store {
+    store_with_bucket().await.0
+}
+
+/// Like [`store`], also returning the bucket name for raw writes.
+pub async fn store_with_bucket() -> (S3Store, String) {
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.insert(
-        "MUNINN_BUCKET".into(),
-        format!("muninn-test-{}", Uuid::now_v7()),
-    );
+    let bucket = format!("muninn-test-{}", Uuid::now_v7());
+    env.insert("MUNINN_BUCKET".into(), bucket.clone());
     let cfg = Config::from_map(&env).expect("config");
     let store = S3Store::from_config(&cfg).await.expect("store");
     store.ensure_bucket().await.expect("bucket");
-    store
+    (store, bucket)
+}
+
+/// Write arbitrary bytes to `key`, bypassing the store, to plant bad data.
+pub async fn put_raw(bucket: &str, key: &str, body: &[u8]) {
+    let sdk = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let mut conf = aws_sdk_s3::config::Builder::from(&sdk);
+    if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+        conf = conf.endpoint_url(url).force_path_style(true);
+    }
+    aws_sdk_s3::Client::from_conf(conf.build())
+        .put_object()
+        .bucket(bucket)
+        .key(key)
+        .body(body.to_vec().into())
+        .send()
+        .await
+        .expect("raw put");
 }
 
 pub fn project() -> Uuid {

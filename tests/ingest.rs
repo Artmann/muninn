@@ -216,3 +216,75 @@ async fn batch_too_large_is_400() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "batch-too-large");
 }
+
+#[tokio::test]
+#[ignore]
+async fn dedupe_restores_missing_index_entry() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let body = json!({ "idempotencyKey": "k", "projectId": p, "label": "l", "content": "c" });
+    let (status, _) = common::post(&app, "/api/v1/ingest", body.clone()).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Same S3 data, but the index lost the entry (request cancelled after
+    // meta.json was written, before the index upsert).
+    let fresh = muninn::api::AppState {
+        index: std::sync::Arc::new(muninn::index::MemoryIndex::new()),
+        ..state.clone()
+    };
+    let app2 = muninn::api::router(fresh.clone());
+    let (status, resp) = common::post(&app2, "/api/v1/ingest", body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["deduplicated"], true);
+    assert_eq!(common::index_len(&fresh, p).await, 1);
+}
+
+#[tokio::test]
+#[ignore]
+async fn blank_idempotency_key_is_rejected() {
+    let (app, _) = common::app().await;
+    let p = common::project();
+    for key in ["", "   "] {
+        let (status, resp) = common::post(
+            &app,
+            "/api/v1/ingest",
+            json!({ "idempotencyKey": key, "projectId": p, "label": "l", "content": "c" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{key:?}");
+        assert_eq!(resp["error"]["code"], "validation");
+        let (status, resp) = common::post(
+            &app,
+            "/api/v1/ingest/batch",
+            json!({ "idempotencyKey": key, "items": [{ "projectId": p, "label": "l", "content": "c" }] }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "batch {key:?}");
+        assert_eq!(resp["error"]["code"], "validation");
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn body_limit_is_ten_mib_with_json_errors() {
+    let (app, _) = common::app().await;
+    let p = common::project();
+    let three_mb = "x".repeat(3 * 1024 * 1024);
+    let (status, resp) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "big", "content": three_mb }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{}", resp["error"]);
+
+    let eleven_mb = "x".repeat(11 * 1024 * 1024);
+    let (status, resp) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "huge", "content": eleven_mb }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(resp["error"]["code"], "payload-too-large");
+}

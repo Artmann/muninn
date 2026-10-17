@@ -37,6 +37,16 @@ pub async fn handler(
     Ok((status, axum::Json(body)))
 }
 
+/// An empty key would silently dedupe every later write that also sends one.
+fn validate_key(key: Option<&str>) -> Result<(), ApiError> {
+    match key {
+        Some(k) if k.trim().is_empty() => Err(ApiError::Validation(
+            "idempotencyKey must not be empty; omit it instead".into(),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Store one datapoint. With an idempotency key, a repeat returns the
 /// original datapoint, and a half-finished earlier attempt is completed
 /// under the id it already reserved.
@@ -45,6 +55,7 @@ pub async fn ingest_one(
     new: NewDatapoint,
     key: Option<&str>,
 ) -> Result<(StatusCode, IngestResponse), ApiError> {
+    validate_key(key)?;
     new.validate().map_err(ApiError::Validation)?;
     let project = new.project_id;
     let mut id = Uuid::now_v7();
@@ -63,6 +74,14 @@ pub async fn ingest_one(
                 .get_content(project, existing_id)
                 .await?
                 .with_context(|| format!("datapoint {existing_id} has metadata but no content"))?;
+            // The earlier attempt may have stopped after meta.json but
+            // before the index upsert. Upserting again is harmless.
+            if meta.embedding.model == state.embedder.model_name() {
+                state
+                    .index
+                    .upsert(project, existing_id, meta.embedding.vector.clone())
+                    .await?;
+            }
             return Ok((
                 StatusCode::OK,
                 IngestResponse {
@@ -159,6 +178,7 @@ pub async fn batch_handler(
     Json(req): Json<BatchRequest>,
 ) -> Result<axum::Json<BatchResponse>, ApiError> {
     state.ensure_ready()?;
+    validate_key(req.idempotency_key.as_deref())?;
     if req.items.len() > MAX_BATCH {
         return Err(ApiError::BatchTooLarge);
     }

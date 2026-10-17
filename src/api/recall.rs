@@ -138,17 +138,20 @@ pub async fn handler(
             .try_collect()
             .await?;
 
+    let mut used_tokens = selected.used_tokens;
     let mut results = Vec::with_capacity(selected.items.len());
     for s in selected.items {
         let meta = by_id
             .remove(&s.id)
             .context("selected id without metadata")?;
-        let content = contents
-            .get(&s.id)
-            .cloned()
-            .flatten()
-            .with_context(|| format!("datapoint {} has metadata but no content", s.id))?;
         let content_tokens = meta.content_tokens;
+        let Some(content) = contents.get(&s.id).cloned().flatten() else {
+            // Only reachable if the content object was removed outside the
+            // service. Skip it rather than fail every query that finds it.
+            tracing::warn!(project = %project, id = %s.id, "metadata without content; skipping");
+            used_tokens -= content_tokens;
+            continue;
+        };
         results.push(RecallItem {
             rank: s.rank,
             score: s.score,
@@ -159,7 +162,7 @@ pub async fn handler(
 
     Ok(axum::Json(RecallResponse {
         results,
-        used_tokens: selected.used_tokens,
+        used_tokens,
         budget_tokens,
     }))
 }
