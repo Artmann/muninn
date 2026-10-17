@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use anyhow::Context;
 use muninn::api::AppState;
 use muninn::api::locks::KeyLocks;
+use muninn::boot;
 use muninn::config::Config;
 use muninn::embed::FastEmbedder;
 use muninn::index::MemoryIndex;
@@ -30,12 +31,18 @@ async fn main() -> anyhow::Result<()> {
         store,
         index: Arc::new(MemoryIndex::new()),
         embedder: Arc::new(embedder),
-        ready: Arc::new(AtomicBool::new(true)),
+        ready: Arc::new(AtomicBool::new(false)),
         locks: KeyLocks::default(),
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
-    tracing::info!(bind = %config.bind, "listening");
+    tracing::info!(bind = %config.bind, "listening; rebuilding index");
+    boot::spawn_rebuild(
+        state.store.clone(),
+        state.index.clone(),
+        state.embedder.clone(),
+        state.ready.clone(),
+    );
     axum::serve(listener, muninn::api::router(state)).await?;
     Ok(())
 }

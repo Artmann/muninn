@@ -5,7 +5,7 @@ pub mod recall;
 pub mod state;
 
 use axum::Router;
-use axum::extract::FromRequest;
+use axum::extract::{FromRequest, State};
 use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -20,8 +20,13 @@ pub struct Json<T>(pub T);
 /// Largest request body accepted, in bytes.
 pub const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
-async fn healthz() -> axum::Json<serde_json::Value> {
-    axum::Json(serde_json::json!({ "status": "ok" }))
+async fn healthz(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
+    let status = if state.ensure_ready().is_ok() {
+        "ok"
+    } else {
+        "loading"
+    };
+    axum::Json(serde_json::json!({ "status": status }))
 }
 
 pub fn router(state: AppState) -> Router {
