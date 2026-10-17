@@ -12,12 +12,14 @@
 
 ```sh
 docker compose up -d                 # LocalStack with S3 on localhost:4566
-set -a; . ./.env.example; set +a     # AWS_* vars pointing at LocalStack
+cp .env.example .env                 # AWS_* vars pointing at LocalStack
 cargo run
 ```
 
-`.env.example` holds the LocalStack endpoint and dummy credentials. Nothing
-loads it automatically; source it as above.
+`.env.example` holds the LocalStack endpoint and dummy credentials. The
+service loads `.env` from the working directory at startup; variables
+already set in the environment take precedence. Tests do not read `.env`,
+so source it for integration runs as shown below.
 
 The bucket is created on startup if it does not exist. The embedding model
 is downloaded into `./.fastembed_cache` on first run and is gitignored.

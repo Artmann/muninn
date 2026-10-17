@@ -21,7 +21,7 @@ Early but working: everything below is implemented and tested. See
 
 ```sh
 docker compose up -d                     # LocalStack with S3
-set -a; . ./.env.example; set +a         # point the AWS SDK at LocalStack
+cp .env.example .env                     # point the AWS SDK at LocalStack
 cargo run                                # first run downloads the embedding model
 ```
 

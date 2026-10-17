@@ -58,6 +58,17 @@ pub struct S3Store {
     bucket: String,
 }
 
+/// Without a region the SDK fails at the first request with a vague
+/// "dispatch failure"; say what to set instead.
+fn require_region(region: Option<&aws_config::Region>) -> anyhow::Result<()> {
+    if region.is_none() {
+        anyhow::bail!(
+            "no AWS region configured: set AWS_REGION, or copy .env.example to .env for LocalStack"
+        );
+    }
+    Ok(())
+}
+
 /// The HTTP status of a service error, if the request got that far.
 fn status_of<E>(err: &SdkError<E, HttpResponse>) -> Option<u16> {
     match err {
@@ -73,6 +84,7 @@ impl S3Store {
 
     pub async fn from_config(cfg: &Config) -> anyhow::Result<S3Store> {
         let sdk = aws_config::load_defaults(BehaviorVersion::latest()).await;
+        require_region(sdk.region())?;
         let mut builder = aws_sdk_s3::config::Builder::from(&sdk);
         if let Some(url) = &cfg.endpoint_url {
             builder = builder.endpoint_url(url).force_path_style(true);
@@ -270,6 +282,14 @@ impl S3Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_region_is_a_clear_error() {
+        let err = require_region(None).unwrap_err().to_string();
+        assert!(err.contains("AWS_REGION"), "{err}");
+        assert!(err.contains(".env"), "{err}");
+        require_region(Some(&aws_config::Region::new("us-east-1"))).unwrap();
+    }
 
     #[test]
     fn key_layout() {

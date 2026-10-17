@@ -16,6 +16,12 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    // Variables already in the environment win over the file.
+    match dotenvy::dotenv() {
+        Ok(path) => tracing::info!(path = %path.display(), "loaded environment file"),
+        Err(e) if e.not_found() => {}
+        Err(e) => return Err(e).context("reading .env"),
+    }
     let config = Config::from_env()?;
 
     let (choice, cache) = (config.embed_model, config.model_cache.clone());

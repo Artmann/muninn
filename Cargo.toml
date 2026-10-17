@@ -12,6 +12,7 @@ aws-sdk-s3 = "1"
 aws-smithy-runtime-api = "1"
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15.7"
 fastembed = "7"
 futures = "0.3"
 hex = "0.4"
