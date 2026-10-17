@@ -50,7 +50,7 @@ the same or other agents as things happen.
 | projectId   | uuid v7              | caller  | all storage and queries are scoped by it      |
 | label       | string               | caller  | title                                         |
 | content     | string               | caller  | the document body                             |
-| timestamp   | ISO 8601 (RFC 3339)  | caller  | when the thing occurred; defaults to now      |
+| timestamp   | ISO 8601 (RFC 3339)  | caller  | when the thing occurred; defaults to now; at most 5 min in the future |
 | metadata    | JSON object          | caller  | defaults to `{}`                              |
 | audience    | string               | caller  | optional; stored and echoed, never filtered   |
 
@@ -280,6 +280,9 @@ two datapoints.
 A request with an idempotency key whose marker exists is not re-validated
 against the new body. The first write wins and the body is ignored.
 
+An empty or whitespace-only `idempotencyKey` is rejected with
+`400 validation`; omit the field instead.
+
 `POST /api/v1/ingest/batch`
 
 ```json
@@ -370,10 +373,11 @@ All errors are JSON: `{ "error": { "code": "...", "message": "..." } }`.
 
 | HTTP | code                    | when                                               |
 |------|-------------------------|----------------------------------------------------|
-| 400  | `validation`            | missing/invalid field, bad uuid, bad timestamp     |
+| 400  | `validation`            | missing/invalid field, bad uuid, bad timestamp, timestamp > 5 min in the future |
 | 400  | `recall-range-invalid`  | `occurredFrom > occurredTo`                        |
 | 400  | `budget-conflict`       | both `level` and `maxTokens`                       |
 | 400  | `batch-too-large`       | more than 100 items                                |
+| 413  | `payload-too-large`     | request body over 10 MiB                           |
 | 503  | `loading`               | index not yet rebuilt from S3                      |
 | 500  | `internal`              | S3 or model failure; message is generic, details logged |
 
@@ -386,7 +390,7 @@ All errors are JSON: `{ "error": { "code": "...", "message": "..." } }`.
   plus standard `AWS_*` vars and `AWS_ENDPOINT_URL`
   for LocalStack. The S3 client uses path-style addressing when an endpoint
   override is set.
-- `GET /healthz` returns `{"status": "ok" | "loading"}`.
+- `GET /healthz` always returns `200` with `{"status": "ok" | "loading"}`.
 - Startup creates the bucket if it does not exist (LocalStack convenience;
   harmless in prod if permissions allow, logged and ignored if not).
 - `docker-compose.yml` at repo root runs LocalStack with the S3 service.
@@ -424,7 +428,7 @@ src/tokens.rs        token counting
 - Exact crate versions and whether to use `time` or `chrono`.
 - The over-fetch multiplier in recall step 2.
 - Startup scan concurrency.
-- Request body size limit (something like 10 MiB is reasonable).
+- Request body size limit (settled: 10 MiB).
 
 ## Open for later
 

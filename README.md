@@ -35,7 +35,8 @@ without network access to the model hub.
 ```sh
 docker build -t muninn .
 docker build -t muninn --build-arg MUNINN_EMBED_MODEL=bge-m3 .   # another model
-docker run -p 8080:8080 --env-file .env.example   -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
+docker run -p 8080:8080 --env-file .env.example \
+  -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
 ```
 
 Against real S3, pass your AWS credentials and region instead and leave
@@ -85,13 +86,16 @@ All requests and responses are JSON. Errors look like
 }
 ```
 
-`projectId`, `label` and `content` are required. `timestamp` defaults to
-now, `metadata` to `{}`. A `timestamp` more than 5 minutes ahead of the
-server clock is rejected with `400 validation`; recall only sees a
-datapoint once its timestamp has passed. Returns `201` with the stored datapoint, or `200`
-with `"deduplicated": true` if the idempotency key was seen before in this
-project. The server assigns the `id`. An empty `idempotencyKey` is rejected; omit the
-field instead.
+`projectId`, `label` and `content` are required; everything else is
+optional. `timestamp` is when the thing happened and defaults to the time
+of ingest. A `timestamp` more than 5 minutes ahead of the server clock is
+rejected with `400 validation`, since recall only sees a datapoint once
+its timestamp has passed. `metadata` defaults to `{}`.
+
+Returns `201` with the stored datapoint, or `200` with
+`"deduplicated": true` if the idempotency key was seen before in this
+project. The server assigns the `id`. An empty `idempotencyKey` is
+rejected; omit the field instead.
 
 ### `POST /api/v1/ingest/batch`
 
@@ -99,8 +103,10 @@ field instead.
 { "idempotencyKey": "optional", "items": [ { "...": "same as ingest, without idempotencyKey" } ] }
 ```
 
-Up to 100 items. All items are validated before anything is written.
-Returns `200` with a per-item result list. With a batch key, a retry after
+Up to 100 items. All items are validated before anything is written; one
+invalid item rejects the whole batch with `400 validation` and a `details`
+array naming the failing indexes. Returns `200` with a per-item result
+list. With a batch key, a retry after
 a partial failure finishes the unfinished items and does not duplicate the
 finished ones.
 

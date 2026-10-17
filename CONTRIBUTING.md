@@ -39,8 +39,8 @@ curl -s -X POST localhost:8080/api/v1/recall -H 'content-type: application/json'
 ```sh
 cargo test                                # unit tests, no S3 or model needed
 set -a; . ./.env.example; set +a
-cargo test -- --ignored                   # integration tests against LocalStack
-cargo test --test ingest -- --ignored     # one suite: store, ingest, recall, boot, real_model
+cargo test -- --ignored                   # all integration and e2e tests against LocalStack
+cargo test --test ingest -- --ignored     # one suite: store, ingest, recall, boot, real_model, e2e
 cargo test --test e2e -- --ignored        # end to end: the real binary over HTTP
 ```
 
@@ -57,7 +57,8 @@ realistic English and Swedish queries find the right memory in their top
 three, and covers restart, time filters, budget, sort and batch retries.
 Server logs go to `target/e2e-logs/`. `e2e_model_switch` is kept separate
 because it downloads a second model (`bge-small-en-v1.5`, about 130 MB);
-run it with `cargo test --test e2e_model_switch -- --ignored`.
+run it with `cargo test --test e2e_model_switch -- --ignored`. A plain
+`cargo test -- --ignored` includes it.
 
 If `cargo run` is holding `target/debug/muninn.exe` on Windows, the build
 can't replace it; stop the server or use `CARGO_TARGET_DIR=target/e2e`.
@@ -66,7 +67,8 @@ can't replace it; stop the server or use `CARGO_TARGET_DIR=target/e2e`.
 
 ```sh
 docker build -t muninn .
-docker run --rm -p 8080:8080 --env-file .env.example   -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
+docker run --rm -p 8080:8080 --env-file .env.example \
+  -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
 ```
 
 The build runs the binary once with `MUNINN_DOWNLOAD_ONLY=1` to bake the

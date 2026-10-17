@@ -48,11 +48,13 @@ everything else.
 
 ## Ingest
 
-1. Validate the request.
+1. Validate the request. A `timestamp` more than 5 minutes ahead of the
+   server clock is rejected: recall would not see it until then.
 2. If there is an idempotency key: mint an id and create the marker with a
    create-only put. If the marker already existed, read its id. If that id
-   already has a `meta.json`, return it as deduplicated. If not, a previous
-   attempt crashed; continue below reusing that id.
+   already has a `meta.json`, re-insert its vector into the index (in case
+   an earlier attempt stopped before that) and return it as deduplicated.
+   If not, a previous attempt crashed; continue below reusing that id.
 3. Build the embedding input: label, content, then one `key: value` line
    per metadata entry. Prefix per model (E5 wants `passage: `). Embed on a
    blocking thread.
@@ -82,7 +84,9 @@ unfinished items and dedupes finished ones.
 6. Number the kept set `rank` 1..n in relevance order.
 7. If `sort` is `chronological`, reorder by timestamp ascending, keeping
    each item's `rank`.
-8. Download `content` for the kept set in parallel and respond.
+8. Download `content` for the kept set in parallel and respond. A kept
+   datapoint whose `content` is missing is logged and left out, and its
+   tokens are not counted in `usedTokens`.
 
 The budget is `level` (8k/16k/24k/32k) or `maxTokens`, never both.
 Documents are whole or omitted, never cut.
@@ -126,14 +130,17 @@ index.
 
 ## Startup
 
-1. Load config.
+1. Load `.env` from the working directory if present (variables already
+   in the environment win), then config. Fail clearly if no AWS region is
+   set.
 2. Load the embedding model or fail. With `MUNINN_DOWNLOAD_ONLY=1`, exit
    here; the Docker build uses this to bake the model into the image.
 3. Create the S3 client (path-style when an endpoint override is set) and
    the bucket if missing.
 4. Start serving, and in the background scan every `meta.json` into the
    index. Datapoints embedded by another model are re-embedded from their
-   content and their `meta.json` rewritten; one whose content is missing is
+   content and their `meta.json` rewritten. A `meta.json` that does not
+   parse, or whose content is missing when it needs re-embedding, is
    logged and skipped. `/healthz` reports `loading` and ingest/recall return
    `503` until the scan finishes. If the scan fails the process exits
    rather than serve a partial index.
