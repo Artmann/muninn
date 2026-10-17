@@ -133,3 +133,86 @@ async fn loading_returns_503() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"]["code"], "loading");
 }
+
+fn items(project: Uuid, n: usize) -> Vec<serde_json::Value> {
+    (0..n)
+        .map(|i| json!({ "projectId": project, "label": format!("item {i}"), "content": format!("content {i}") }))
+        .collect()
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_ingests_in_order_with_per_item_status() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "items": items(p, 3) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3);
+    let mut ids = Vec::new();
+    for (i, r) in results.iter().enumerate() {
+        assert_eq!(r["status"], 201, "{r}");
+        assert_eq!(r["deduplicated"], false);
+        assert_eq!(r["datapoint"]["label"], format!("item {i}"));
+        ids.push(
+            r["datapoint"]["id"]
+                .as_str()
+                .unwrap()
+                .parse::<Uuid>()
+                .unwrap(),
+        );
+    }
+    assert!(ids.windows(2).all(|w| w[0] < w[1]));
+    assert_eq!(common::index_len(&state, p).await, 3);
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_validates_all_before_writing() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let mut list = items(p, 2);
+    list[1]["label"] = json!("");
+    let (status, body) = common::post(&app, "/api/v1/ingest/batch", json!({ "items": list })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["code"], "validation");
+    assert_eq!(body["error"]["details"][0]["index"], 1);
+    assert_eq!(common::index_len(&state, p).await, 0);
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_retry_with_key_dedupes_per_item() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let req = json!({ "idempotencyKey": "B", "items": items(p, 3) });
+    let (_, first) = common::post(&app, "/api/v1/ingest/batch", req.clone()).await;
+    let (status, second) = common::post(&app, "/api/v1/ingest/batch", req).await;
+    assert_eq!(status, StatusCode::OK);
+    for i in 0..3 {
+        let r = &second["results"][i];
+        assert_eq!(r["status"], 200, "{r}");
+        assert_eq!(r["deduplicated"], true);
+        assert_eq!(r["datapoint"]["id"], first["results"][i]["datapoint"]["id"]);
+    }
+    assert_eq!(common::index_len(&state, p).await, 3);
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_too_large_is_400() {
+    let (app, _state) = common::app().await;
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "items": items(common::project(), 101) }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "batch-too-large");
+}

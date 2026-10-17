@@ -27,6 +27,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/v1/ingest", post(ingest::handler))
+        .route("/api/v1/ingest/batch", post(ingest::batch_handler))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(state)

@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::api::error::ItemError;
 use crate::api::state::AppState;
 use crate::api::{ApiError, Json};
 use crate::domain::{Datapoint, Meta, NewDatapoint, StoredEmbedding};
@@ -116,4 +117,101 @@ async fn write(state: &AppState, new: NewDatapoint, id: Uuid) -> Result<Datapoin
     state.store.put_meta(&meta).await?;
     state.index.upsert(datapoint.project_id, id, vector).await?;
     Ok(datapoint)
+}
+
+/// Most items accepted in one batch.
+pub const MAX_BATCH: usize = 100;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchRequest {
+    pub idempotency_key: Option<String>,
+    pub items: Vec<NewDatapoint>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ItemErrorBody {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum BatchItemResult {
+    Ok {
+        status: u16,
+        deduplicated: bool,
+        datapoint: Datapoint,
+    },
+    Err {
+        status: u16,
+        error: ItemErrorBody,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchResponse {
+    pub results: Vec<BatchItemResult>,
+}
+
+pub async fn batch_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BatchRequest>,
+) -> Result<axum::Json<BatchResponse>, ApiError> {
+    state.ensure_ready()?;
+    if req.items.len() > MAX_BATCH {
+        return Err(ApiError::BatchTooLarge);
+    }
+    let details: Vec<ItemError> = req
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            item.validate()
+                .err()
+                .map(|message| ItemError { index, message })
+        })
+        .collect();
+    if !details.is_empty() {
+        return Err(ApiError::ValidationDetailed {
+            message: "invalid items".into(),
+            details,
+        });
+    }
+
+    let total = req.items.len();
+    let mut results = Vec::with_capacity(total);
+    for (i, item) in req.items.into_iter().enumerate() {
+        let key = req.idempotency_key.as_ref().map(|k| format!("{k}#{i}"));
+        match ingest_one(&state, item, key.as_deref()).await {
+            Ok((status, resp)) => results.push(BatchItemResult::Ok {
+                status: status.as_u16(),
+                deduplicated: resp.deduplicated,
+                datapoint: resp.datapoint,
+            }),
+            Err(e) => {
+                if let ApiError::Internal(inner) = &e {
+                    tracing::error!(error = ?inner, item = i, "batch item failed");
+                }
+                results.push(BatchItemResult::Err {
+                    status: e.status().as_u16(),
+                    error: ItemErrorBody {
+                        code: e.code().into(),
+                        message: e.to_string(),
+                    },
+                });
+                for _ in i + 1..total {
+                    results.push(BatchItemResult::Err {
+                        status: 0,
+                        error: ItemErrorBody {
+                            code: "skipped".into(),
+                            message: "not attempted after an earlier item failed".into(),
+                        },
+                    });
+                }
+                break;
+            }
+        }
+    }
+    Ok(axum::Json(BatchResponse { results }))
 }
