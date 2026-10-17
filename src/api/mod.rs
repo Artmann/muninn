@@ -1,6 +1,7 @@
 pub mod error;
 pub mod ingest;
 pub mod locks;
+pub mod recall;
 pub mod state;
 
 use axum::Router;
@@ -28,6 +29,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/api/v1/ingest", post(ingest::handler))
         .route("/api/v1/ingest/batch", post(ingest::batch_handler))
+        .route("/api/v1/recall", post(recall::handler))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
