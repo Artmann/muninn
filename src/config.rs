@@ -4,11 +4,13 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 
+use crate::embed::ModelChoice;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bucket: String,
     pub bind: SocketAddr,
-    pub embed_model: String,
+    pub embed_model: ModelChoice,
     pub model_cache: PathBuf,
     pub endpoint_url: Option<String>,
 }
@@ -29,7 +31,8 @@ impl Config {
             bind,
             embed_model: get("MUNINN_EMBED_MODEL")
                 .unwrap_or("multilingual-e5-small")
-                .to_string(),
+                .parse()
+                .context("MUNINN_EMBED_MODEL")?,
             model_cache: PathBuf::from(get("MUNINN_MODEL_CACHE").unwrap_or("./.fastembed_cache")),
             endpoint_url: get("AWS_ENDPOINT_URL").map(str::to_string),
         })
@@ -47,7 +50,7 @@ mod tests {
         let c = Config::from_map(&HashMap::new()).unwrap();
         assert_eq!(c.bucket, "muninn");
         assert_eq!(c.bind.to_string(), "0.0.0.0:8080");
-        assert_eq!(c.embed_model, "multilingual-e5-small");
+        assert_eq!(c.embed_model.name(), "multilingual-e5-small");
         assert_eq!(c.model_cache, PathBuf::from("./.fastembed_cache"));
         assert_eq!(c.endpoint_url, None);
     }
@@ -63,6 +66,12 @@ mod tests {
         assert_eq!(c.bucket, "b");
         assert_eq!(c.bind.port(), 9000);
         assert_eq!(c.endpoint_url.as_deref(), Some("http://localhost:4566"));
+    }
+
+    #[test]
+    fn unknown_model_is_error() {
+        let m = HashMap::from([("MUNINN_EMBED_MODEL".into(), "nope".into())]);
+        assert!(Config::from_map(&m).is_err());
     }
 
     #[test]
