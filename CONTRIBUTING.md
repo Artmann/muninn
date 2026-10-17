@@ -3,7 +3,9 @@
 ## Prerequisites
 
 - Rust stable (edition 2024)
-- Docker, for LocalStack
+- Docker, for LocalStack. The compose file pins `localstack/localstack:4.14`
+  because releases from 2026.03 on refuse to start without a LocalStack
+  auth token.
 - About 500 MB of disk for the default embedding model
 
 ## Local setup
@@ -40,7 +42,8 @@ curl -s -X POST localhost:8080/api/v1/recall -H 'content-type: application/json'
 
 ```sh
 cargo test                       # unit tests, no S3 or model needed
-MUNINN_IT=1 cargo test -- --ignored   # integration tests against LocalStack
+set -a; . ./.env.example; set +a
+cargo test -- --ignored          # integration tests against LocalStack
 ```
 
 Unit tests cover the recall selection algorithm, embedding input
