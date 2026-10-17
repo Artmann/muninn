@@ -13,18 +13,33 @@ can paste straight into a prompt.
 
 ## Status
 
-Early. The API below is designed but not yet implemented. See
+Early but working: everything below is implemented and tested. See
 [ARCHITECTURE.md](ARCHITECTURE.md) for how it works and
 [CONTRIBUTING.md](CONTRIBUTING.md) to run it locally.
 
 ## Quick start
 
 ```sh
-docker compose up -d     # LocalStack with S3
-cargo run                # first run downloads the embedding model
+docker compose up -d                     # LocalStack with S3
+set -a; . ./.env.example; set +a         # point the AWS SDK at LocalStack
+cargo run                                # first run downloads the embedding model
 ```
 
 The service listens on `http://localhost:8080`.
+
+### Docker
+
+The image bakes the embedding model in at build time, so containers start
+without network access to the model hub.
+
+```sh
+docker build -t muninn .
+docker build -t muninn --build-arg MUNINN_EMBED_MODEL=bge-m3 .   # another model
+docker run -p 8080:8080 --env-file .env.example   -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
+```
+
+Against real S3, pass your AWS credentials and region instead and leave
+`AWS_ENDPOINT_URL` unset.
 
 ## Configuration
 
@@ -33,7 +48,8 @@ The service listens on `http://localhost:8080`.
 | `MUNINN_BUCKET`      | `muninn`               | S3 bucket; created on startup if missing           |
 | `MUNINN_BIND`        | `0.0.0.0:8080`         | listen address                                     |
 | `MUNINN_EMBED_MODEL` | `multilingual-e5-small`| embedding model, see below                         |
-| `MUNINN_MODEL_CACHE` | `./.fastembed_cache`   | where model files are downloaded                   |
+| `MUNINN_MODEL_CACHE` | `./.fastembed_cache`   | where model files are downloaded (`/models` in Docker) |
+| `MUNINN_DOWNLOAD_ONLY` |                      | `1`: download the model and exit without serving   |
 | `AWS_ENDPOINT_URL`   |                        | set to `http://localhost:4566` for LocalStack      |
 | `AWS_*`              |                        | standard credentials and region                    |
 
@@ -115,9 +131,9 @@ document that does not fit the remaining budget is skipped.
 
 ### `GET /healthz`
 
-`{"status": "ok"}` once the search index has been rebuilt from S3,
-`{"status": "loading"}` before that. Ingest and recall return `503` while
-loading.
+Always `200`. The body is `{"status": "ok"}` once the search index has
+been rebuilt from S3 and `{"status": "loading"}` before that. Ingest and
+recall return `503` with code `loading` until then.
 
 ## Not yet
 

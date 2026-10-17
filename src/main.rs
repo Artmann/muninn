@@ -18,14 +18,20 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let config = Config::from_env()?;
 
-    let store = S3Store::from_config(&config).await?;
-    store.ensure_bucket().await?;
-
     let (choice, cache) = (config.embed_model, config.model_cache.clone());
     tracing::info!(model = choice.name(), "loading embedding model");
     let embedder = tokio::task::spawn_blocking(move || FastEmbedder::new(choice, &cache))
         .await
         .context("model loading panicked")??;
+
+    // Used by the Docker build to bake the model into the image.
+    if std::env::var("MUNINN_DOWNLOAD_ONLY").as_deref() == Ok("1") {
+        tracing::info!(cache = %config.model_cache.display(), "model downloaded");
+        return Ok(());
+    }
+
+    let store = S3Store::from_config(&config).await?;
+    store.ensure_bucket().await?;
 
     let state = AppState {
         store,

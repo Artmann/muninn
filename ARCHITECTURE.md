@@ -110,11 +110,11 @@ downloads them at build time so containers start offline.
 ```rust
 trait VectorIndex {
     async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> Result<()>;
-    async fn search(&self, project: Uuid, query: Vec<f32>, k: usize) -> Result<Vec<(Uuid, f32)>>;
+    async fn search(&self, project: Uuid, query: &[f32], k: usize) -> Result<Vec<(Uuid, f32)>>;
 }
 ```
 
-v1 is a `HashMap<projectId, Vec<(id, vector)>>` behind an `RwLock` with
+v1 is a `HashMap<projectId, HashMap<id, vector>>` behind an `RwLock` with
 brute-force dot products. It is good to low tens of thousands of datapoints
 per project. Time filtering happens in recall, not in the index, which is
 why recall over-fetches.
@@ -126,13 +126,17 @@ index.
 
 ## Startup
 
-1. Load config, create the S3 client (path-style when an endpoint override
-   is set).
-2. Load the embedding model or fail.
-3. Create the bucket if missing.
-4. Scan `meta.json` objects into the index. `/healthz` reports `loading`
-   and ingest/recall return `503` until this finishes.
-5. Serve.
+1. Load config.
+2. Load the embedding model or fail. With `MUNINN_DOWNLOAD_ONLY=1`, exit
+   here; the Docker build uses this to bake the model into the image.
+3. Create the S3 client (path-style when an endpoint override is set) and
+   the bucket if missing.
+4. Start serving, and in the background scan every `meta.json` into the
+   index. Datapoints embedded by another model are re-embedded from their
+   content and their `meta.json` rewritten; one whose content is missing is
+   logged and skipped. `/healthz` reports `loading` and ingest/recall return
+   `503` until the scan finishes. If the scan fails the process exits
+   rather than serve a partial index.
 
 ## Error envelope
 

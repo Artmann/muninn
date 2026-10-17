@@ -11,19 +11,13 @@
 ## Local setup
 
 ```sh
-docker compose up -d        # LocalStack with S3 on localhost:4566
-cp .env.example .env        # if present; otherwise export the vars below
+docker compose up -d                 # LocalStack with S3 on localhost:4566
+set -a; . ./.env.example; set +a     # AWS_* vars pointing at LocalStack
 cargo run
 ```
 
-Environment for local dev:
-
-```sh
-AWS_ENDPOINT_URL=http://localhost:4566
-AWS_ACCESS_KEY_ID=test
-AWS_SECRET_ACCESS_KEY=test
-AWS_REGION=us-east-1
-```
+`.env.example` holds the LocalStack endpoint and dummy credentials. Nothing
+loads it automatically; source it as above.
 
 The bucket is created on startup if it does not exist. The embedding model
 is downloaded into `./.fastembed_cache` on first run and is gitignored.
@@ -41,21 +35,37 @@ curl -s -X POST localhost:8080/api/v1/recall -H 'content-type: application/json'
 ## Tests
 
 ```sh
-cargo test                       # unit tests, no S3 or model needed
+cargo test                                # unit tests, no S3 or model needed
 set -a; . ./.env.example; set +a
-cargo test -- --ignored          # integration tests against LocalStack
+cargo test -- --ignored                   # integration tests against LocalStack
+cargo test --test ingest -- --ignored     # one suite: store, ingest, recall, boot, real_model
 ```
 
 Unit tests cover the recall selection algorithm, embedding input
 construction, and the in-memory index, using a fake embedder. Integration
-tests need LocalStack running and exercise ingest, dedupe, and index
-rebuild after restart.
+tests need LocalStack running; each test gets its own fresh bucket. They
+exercise the S3 store, ingest and dedupe, recall, and index rebuild.
+`real_model` loads the real `multilingual-e5-small` model (downloading it
+on first run) and checks a Swedish passage matches an English query.
+
+## Docker
+
+```sh
+docker build -t muninn .
+docker run --rm -p 8080:8080 --env-file .env.example   -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
+```
+
+The build runs the binary once with `MUNINN_DOWNLOAD_ONLY=1` to bake the
+model into `/models`. Both stages use Debian trixie: the prebuilt ONNX
+Runtime that `ort` links needs glibc 2.38 or newer, which bookworm lacks.
 
 ## Code layout
 
 ```
-src/main.rs          config, wiring, server
-src/api/             handlers, request/response types, error mapping
+src/main.rs          wiring, download-only mode, server
+src/config.rs        environment variables
+src/boot.rs          index rebuild from S3 at startup
+src/api/             handlers, request/response types, error mapping, key locks
 src/domain.rs        Datapoint, validation
 src/embed.rs         Embedder trait + fastembed impl
 src/store.rs         S3 document store (content, meta, idempotency)
@@ -78,7 +88,7 @@ doc and [ARCHITECTURE.md](ARCHITECTURE.md) in the same PR.
 
 ## Conventions
 
-- `cargo fmt` and `cargo clippy -- -D warnings` must pass.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings` must pass.
 - Errors returned to clients use the `{ "error": { "code", "message" } }`
   envelope; add new codes to the table in ARCHITECTURE.md.
 - Commits: short imperative subject line. No generated co-author trailers.
