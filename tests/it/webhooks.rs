@@ -334,3 +334,32 @@ async fn request_logs_leave_out_the_webhook_token() {
     );
     assert!(!logs.contains(&token), "{logs}");
 }
+
+#[tokio::test]
+#[ignore]
+async fn future_event_time_falls_back_to_now() {
+    // A sender's clock or field we cannot trust must not get its events
+    // rejected; an unusable time is ignored like an unparseable one.
+    let (app, _) = common::app().await;
+    let p = common::project();
+    let (_, path) = create(
+        &app,
+        p,
+        json!({ "name": "n", "contentPath": "$.text", "occurredAtPath": "$.at" }),
+    )
+    .await;
+    let (status, resp) = send(
+        &app,
+        &path,
+        json!({ "text": "hi", "at": "3000-01-01T00:00:00Z" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{resp}");
+    let (_, list) = common::get(&app, &format!("/api/v1/datapoints?projectId={p}")).await;
+    let at: chrono::DateTime<chrono::Utc> = list["datapoints"][0]["timestamp"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(at <= chrono::Utc::now());
+}

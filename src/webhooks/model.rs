@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::datapoints::{NewDatapoint, validate_audience};
+use crate::datapoints::{MAX_CLOCK_SKEW, NewDatapoint, validate_audience};
 
 /// Most webhooks one project holds.
 pub const MAX_PER_PROJECT: usize = 20;
@@ -365,7 +365,12 @@ impl Webhook {
             datapoint.label = Some(text_of(label));
         }
         if let Some(path) = &s.occurred_at_path {
-            datapoint.timestamp = path.resolve(&json).and_then(parse_time);
+            // A time ingest would reject as future is ignored like one that
+            // does not parse, rather than failing the event.
+            datapoint.timestamp = path
+                .resolve(&json)
+                .and_then(parse_time)
+                .filter(|t| *t <= Utc::now() + MAX_CLOCK_SKEW);
         }
         if let Some(path) = &s.id_path {
             let id = path
