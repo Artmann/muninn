@@ -371,6 +371,50 @@ impl S3Store {
         Ok(keys)
     }
 
+    /// Up to `max` of a project's datapoint ids in key order, starting after
+    /// `after`. Fewer than `max` means there are no more.
+    pub async fn list_datapoint_ids(
+        &self,
+        project: Uuid,
+        after: Option<Uuid>,
+        max: usize,
+    ) -> anyhow::Result<Vec<Uuid>> {
+        let prefix = format!("projects/{project}/datapoints/");
+        // `meta.json` sorts after `content`, so this skips both of `after`'s keys.
+        let start_after = after.map(|id| keys::meta(project, id));
+        // Two objects per datapoint.
+        let page_size = (max * 2 + 1).min(1000) as i32;
+        let mut pages = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(&prefix)
+            .set_start_after(start_after)
+            .max_keys(page_size)
+            .into_paginator()
+            .send();
+        let mut ids = Vec::new();
+        while ids.len() < max
+            && let Some(page) = pages.next().await
+        {
+            let page = page.map_err(|e| {
+                explain(
+                    e,
+                    format!("listing {prefix} in {}", self.bucket),
+                    &s3_permissions(&self.bucket),
+                )
+            })?;
+            ids.extend(
+                page.contents()
+                    .iter()
+                    .filter_map(|o| keys::parse_meta_key(o.key()?))
+                    .map(|(_, id)| id),
+            );
+        }
+        ids.truncate(max);
+        Ok(ids)
+    }
+
     /// Every datapoint's metadata across all projects.
     pub async fn list_metas(&self) -> anyhow::Result<Vec<Meta>> {
         let found: Vec<(Uuid, Uuid)> = self

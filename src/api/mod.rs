@@ -1,3 +1,4 @@
+pub mod datapoints;
 pub mod delete;
 pub mod error;
 pub mod ingest;
@@ -39,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ingest", post(ingest::handler))
         .route("/api/v1/ingest/batch", post(ingest::batch_handler))
         .route("/api/v1/recall", post(recall::handler))
+        .route("/api/v1/datapoints", get(datapoints::list))
         .route("/api/v1/delete", post(delete::handler))
         .route(
             "/api/v1/webhooks",

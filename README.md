@@ -9,12 +9,17 @@ can paste straight into a prompt.
   AI API.
 - S3 as the only storage backend, with an optional Amazon S3 Vectors
   index for larger data.
-- Idempotent writes.
+- Idempotent writes, and updates and deletes by your own `sourceId`.
+- Webhooks that turn events from other services into datapoints, with no
+  code in between.
 - Everything scoped to a `projectId`.
 
 ## Status
 
-Early but working: everything below is implemented and tested. See
+Early but working: everything below is implemented and tested. That is
+ingest (single and batch), recall, delete, listing stored datapoints, and
+inbound webhooks. There is no auth yet, so run it on a private network.
+[Not yet](#not-yet) lists what is missing. See
 [ARCHITECTURE.md](ARCHITECTURE.md) for how it works and
 [CONTRIBUTING.md](CONTRIBUTING.md) to run it locally.
 
@@ -34,7 +39,16 @@ cp .env.example .env                     # point the AWS SDK at LocalStack
 cargo run                                # first run downloads the embedding model
 ```
 
-The service listens on `http://localhost:8080`.
+The service listens on `http://localhost:8080`. To have something to
+recall, load a set of sample datapoints and list them:
+
+```sh
+cargo run --example seed                 # or: cargo run --example seed -- http://host:8080
+curl 'localhost:8080/api/v1/datapoints?projectId=0192f0c0-5eed-7000-8000-000000000001'
+```
+
+The seed uses `sourceId`s, so running it again updates the same
+datapoints instead of adding copies.
 
 ### Docker
 
@@ -239,6 +253,35 @@ with the `id`, the `sourceId` when given, and `deleted`. `deleted` is
 Deleting a datapoint that was stored with an `idempotencyKey` and then
 retrying that same request stores it again.
 
+### `GET /api/v1/datapoints`
+
+```
+GET /api/v1/datapoints?projectId=0192...uuid&audience=sales&label=call&limit=20
+```
+
+Lists a project's stored datapoints, read straight from S3, to check what
+is in there. It also works while the index is still loading.
+
+| Parameter        | Notes                                                              |
+|------------------|--------------------------------------------------------------------|
+| `projectId`      | required                                                           |
+| `limit`          | 1 to 200, default 50                                               |
+| `cursor`         | `nextCursor` from the previous page                                |
+| `sourceId`       | only the datapoint with this `sourceId`                            |
+| `audience`       | only this audience; `project` means datapoints with none           |
+| `label`          | only labels containing this text, ignoring case                    |
+| `occurredFrom`   | inclusive start on `timestamp`                                     |
+| `occurredTo`     | inclusive end; start after end is `400 recall-range-invalid`       |
+| `includeContent` | `true` to include `content`; off by default since it costs an extra read each |
+
+Returns `{"datapoints": [...], "nextCursor": "..."}`. Each datapoint has
+the same fields as in ingest, without `content` unless asked for, plus
+`contentTokens`, `contentSha256`, `embeddingModel` and `embeddingDim`.
+`nextCursor` is `null` on the last page. Pages are in `id` order, not by
+time. One request reads at most 1000 datapoints, so with narrow filters a
+page can have fewer than `limit` results, or none, and still a
+`nextCursor`; keep going until it is `null`.
+
 ### Webhooks
 
 A webhook turns events that another service POSTs (Jira, GitHub, an alert
@@ -362,14 +405,16 @@ document that does not fit the remaining budget is skipped.
 ### `GET /healthz`
 
 Always `200`. The body is `{"status": "ok"}` once the search index has
-been rebuilt from S3 and `{"status": "loading"}` before that. Ingest and
-recall return `503` with code `loading` until then.
+been rebuilt from S3 and `{"status": "loading"}` before that. Ingest,
+recall, delete and webhook events return `503` with code `loading` until
+then. Listing datapoints and managing webhooks work meanwhile.
 
 ## Not yet
 
 - Auth
-- Filtering on `audience`
-- Metadata filters on recall
+- Filtering on `audience` in recall
+- Metadata filters on recall and listing
+- Signature checks on webhook events
 
 ## License
 
