@@ -1,4 +1,4 @@
-//! Switching `MUNINN_EMBED_MODEL` re-embeds existing data on the next start.
+//! Switching `EMBED_MODEL` re-embeds existing data on the next start.
 //! Separate from `e2e` because it downloads `bge-small-en-v1.5` (~130 MB)
 //! on first run.
 //!
@@ -45,7 +45,7 @@ async fn switching_model_reembeds_existing_data() {
     assert_eq!(labels(&resp)[0], "Storage decision");
 
     let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    env.insert("MUNINN_BUCKET".into(), bucket);
+    env.insert("BUCKET".into(), bucket);
     let store = S3Store::from_config(&Config::from_map(&env).unwrap())
         .await
         .unwrap();

@@ -10,10 +10,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/muninn /usr/local/bin/muninn
 
-ARG MUNINN_EMBED_MODEL=multilingual-e5-small
-ENV MUNINN_EMBED_MODEL=${MUNINN_EMBED_MODEL} \
-    MUNINN_MODEL_CACHE=/models
-RUN MUNINN_DOWNLOAD_ONLY=1 /usr/local/bin/muninn
+ARG EMBED_MODEL=multilingual-e5-small
+ENV EMBED_MODEL=${EMBED_MODEL} \
+    MODEL_CACHE=/models
+RUN DOWNLOAD_ONLY=1 /usr/local/bin/muninn
 
 EXPOSE 8080
 CMD ["muninn"]

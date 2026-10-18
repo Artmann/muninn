@@ -61,11 +61,11 @@ run it with `cargo test --test e2e_model_switch -- --ignored`. A plain
 `cargo test -- --ignored` includes it.
 
 `s3vectors` runs against real Amazon S3 Vectors, since LocalStack does
-not emulate it. It skips itself unless `MUNINN_TEST_VECTOR_BUCKET` is set.
+not emulate it. It skips itself unless `TEST_VECTOR_BUCKET` is set.
 With real AWS credentials and region (and no `AWS_ENDPOINT_URL`):
 
 ```sh
-MUNINN_TEST_VECTOR_BUCKET=muninn-dev-vectors cargo test --test s3vectors -- --ignored
+TEST_VECTOR_BUCKET=muninn-dev-vectors cargo test --test s3vectors -- --ignored
 ```
 
 It creates a throwaway index in that bucket and deletes it afterwards.
@@ -81,7 +81,7 @@ docker run --rm -p 8080:8080 --env-file .env.example \
   -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
 ```
 
-The build runs the binary once with `MUNINN_DOWNLOAD_ONLY=1` to bake the
+The build runs the binary once with `DOWNLOAD_ONLY=1` to bake the
 model into `/models`. Both stages use Debian trixie: the prebuilt ONNX
 Runtime that `ort` links needs glibc 2.38 or newer, which bookworm lacks.
 

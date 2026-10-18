@@ -21,7 +21,7 @@ pub struct Config {
 pub enum VectorStore {
     /// In process, rebuilt from S3 on every start. The default.
     Memory,
-    /// Amazon S3 Vectors, in the bucket named by `MUNINN_VECTOR_BUCKET`.
+    /// Amazon S3 Vectors, in the bucket named by `VECTOR_BUCKET`.
     S3 { bucket: String },
 }
 
@@ -31,7 +31,7 @@ impl VectorStore {
             None | Some("") | Some("memory") => Ok(VectorStore::Memory),
             Some("s3") => {
                 let bucket = bucket.map(str::trim).filter(|b| !b.is_empty()).context(
-                    "VECTOR_STORE_TYPE=s3 needs MUNINN_VECTOR_BUCKET to name the vector bucket",
+                    "VECTOR_STORE_TYPE=s3 needs VECTOR_BUCKET to name the vector bucket",
                 )?;
                 Ok(VectorStore::S3 {
                     bucket: bucket.to_string(),
@@ -51,23 +51,20 @@ impl Config {
 
     pub fn from_map(m: &HashMap<String, String>) -> anyhow::Result<Config> {
         let get = |k: &str| m.get(k).map(String::as_str);
-        let bind_raw = get("MUNINN_BIND").unwrap_or("0.0.0.0:8080");
+        let bind_raw = get("BIND").unwrap_or("0.0.0.0:8080");
         let bind = bind_raw
             .parse()
-            .with_context(|| format!("MUNINN_BIND is not a socket address: {bind_raw}"))?;
+            .with_context(|| format!("BIND is not a socket address: {bind_raw}"))?;
         Ok(Config {
-            bucket: get("MUNINN_BUCKET").unwrap_or("muninn").to_string(),
+            bucket: get("BUCKET").unwrap_or("muninn").to_string(),
             bind,
-            embed_model: get("MUNINN_EMBED_MODEL")
+            embed_model: get("EMBED_MODEL")
                 .unwrap_or("multilingual-e5-small")
                 .parse()
-                .context("MUNINN_EMBED_MODEL")?,
-            model_cache: PathBuf::from(get("MUNINN_MODEL_CACHE").unwrap_or("./.fastembed_cache")),
+                .context("EMBED_MODEL")?,
+            model_cache: PathBuf::from(get("MODEL_CACHE").unwrap_or("./.fastembed_cache")),
             endpoint_url: get("AWS_ENDPOINT_URL").map(str::to_string),
-            vector_store: VectorStore::from_env(
-                get("VECTOR_STORE_TYPE"),
-                get("MUNINN_VECTOR_BUCKET"),
-            )?,
+            vector_store: VectorStore::from_env(get("VECTOR_STORE_TYPE"), get("VECTOR_BUCKET"))?,
         })
     }
 }
@@ -99,11 +96,7 @@ mod tests {
 
     #[test]
     fn vector_store_s3_uses_bucket() {
-        let c = vector_env(&[
-            ("VECTOR_STORE_TYPE", "S3"),
-            ("MUNINN_VECTOR_BUCKET", "vecs"),
-        ])
-        .unwrap();
+        let c = vector_env(&[("VECTOR_STORE_TYPE", "S3"), ("VECTOR_BUCKET", "vecs")]).unwrap();
         assert_eq!(
             c.vector_store,
             VectorStore::S3 {
@@ -116,21 +109,17 @@ mod tests {
     fn vector_store_s3_without_bucket_is_error() {
         for bucket in [None, Some(" ")] {
             let mut pairs = vec![("VECTOR_STORE_TYPE", "s3")];
-            pairs.extend(bucket.map(|b| ("MUNINN_VECTOR_BUCKET", b)));
+            pairs.extend(bucket.map(|b| ("VECTOR_BUCKET", b)));
             let err = format!("{:#}", vector_env(&pairs).unwrap_err());
-            assert!(err.contains("MUNINN_VECTOR_BUCKET"), "{err}");
+            assert!(err.contains("VECTOR_BUCKET"), "{err}");
         }
     }
 
     #[test]
     fn vector_store_memory_ignores_bucket() {
-        let c = vector_env(&[
-            ("VECTOR_STORE_TYPE", "memory"),
-            ("MUNINN_VECTOR_BUCKET", "vecs"),
-        ])
-        .unwrap();
+        let c = vector_env(&[("VECTOR_STORE_TYPE", "memory"), ("VECTOR_BUCKET", "vecs")]).unwrap();
         assert_eq!(c.vector_store, VectorStore::Memory);
-        let c = vector_env(&[("MUNINN_VECTOR_BUCKET", "vecs")]).unwrap();
+        let c = vector_env(&[("VECTOR_BUCKET", "vecs")]).unwrap();
         assert_eq!(c.vector_store, VectorStore::Memory, "memory is the default");
     }
 
@@ -146,8 +135,8 @@ mod tests {
     #[test]
     fn env_overrides() {
         let m = HashMap::from([
-            ("MUNINN_BUCKET".into(), "b".into()),
-            ("MUNINN_BIND".into(), "127.0.0.1:9000".into()),
+            ("BUCKET".into(), "b".into()),
+            ("BIND".into(), "127.0.0.1:9000".into()),
             ("AWS_ENDPOINT_URL".into(), "http://localhost:4566".into()),
         ]);
         let c = Config::from_map(&m).unwrap();
@@ -158,12 +147,12 @@ mod tests {
 
     #[test]
     fn unknown_model_is_error() {
-        let m = HashMap::from([("MUNINN_EMBED_MODEL".into(), "nope".into())]);
+        let m = HashMap::from([("EMBED_MODEL".into(), "nope".into())]);
         assert!(Config::from_map(&m).is_err());
     }
 
     #[test]
     fn bad_bind_is_error() {
-        assert!(Config::from_map(&HashMap::from([("MUNINN_BIND".into(), "nope".into())])).is_err());
+        assert!(Config::from_map(&HashMap::from([("BIND".into(), "nope".into())])).is_err());
     }
 }

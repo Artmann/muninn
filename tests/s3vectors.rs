@@ -1,5 +1,5 @@
 //! Runs against real Amazon S3 Vectors; LocalStack does not emulate it.
-//! Set `MUNINN_TEST_VECTOR_BUCKET` and AWS credentials/region (without
+//! Set `TEST_VECTOR_BUCKET` and AWS credentials/region (without
 //! `AWS_ENDPOINT_URL`), then `cargo test --test s3vectors -- --ignored`.
 //! Creates a throwaway index in that bucket and deletes it afterwards.
 
@@ -10,8 +10,8 @@ use uuid::Uuid;
 #[tokio::test]
 #[ignore]
 async fn upsert_and_search_scoped_by_project() {
-    let Ok(bucket) = std::env::var("MUNINN_TEST_VECTOR_BUCKET") else {
-        eprintln!("MUNINN_TEST_VECTOR_BUCKET not set; skipping");
+    let Ok(bucket) = std::env::var("TEST_VECTOR_BUCKET") else {
+        eprintln!("TEST_VECTOR_BUCKET not set; skipping");
         return;
     };
     let sdk = S3Store::load_sdk().await.unwrap();
@@ -60,8 +60,8 @@ async fn upsert_and_search_scoped_by_project() {
 #[tokio::test]
 #[ignore]
 async fn existing_index_with_other_dimension_is_rejected() {
-    let Ok(bucket) = std::env::var("MUNINN_TEST_VECTOR_BUCKET") else {
-        eprintln!("MUNINN_TEST_VECTOR_BUCKET not set; skipping");
+    let Ok(bucket) = std::env::var("TEST_VECTOR_BUCKET") else {
+        eprintln!("TEST_VECTOR_BUCKET not set; skipping");
         return;
     };
     let sdk = S3Store::load_sdk().await.unwrap();

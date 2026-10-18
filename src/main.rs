@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .context("model loading panicked")??;
 
     // Used by the Docker build to bake the model into the image.
-    if std::env::var("MUNINN_DOWNLOAD_ONLY").as_deref() == Ok("1") {
+    if std::env::var("DOWNLOAD_ONLY").as_deref() == Ok("1") {
         tracing::info!(cache = %config.model_cache.display(), "model downloaded");
         return Ok(());
     }

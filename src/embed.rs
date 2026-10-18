@@ -8,7 +8,7 @@ use anyhow::Context;
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use serde_json::{Map, Value};
 
-/// The embedding models Muninn can run, keyed by their `MUNINN_EMBED_MODEL` names.
+/// The embedding models Muninn can run, keyed by their `EMBED_MODEL` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelChoice {
     MultilingualE5Small,

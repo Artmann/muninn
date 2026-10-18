@@ -27,7 +27,7 @@ impl Server {
         Server::start_with(&format!("muninn-e2e-{}", Uuid::now_v7()), None).await
     }
 
-    /// A server on `bucket`, optionally with another `MUNINN_EMBED_MODEL`.
+    /// A server on `bucket`, optionally with another `EMBED_MODEL`.
     /// Waits until `/healthz` reports `ok`.
     pub async fn start_with(bucket: &str, model: Option<&str>) -> Server {
         assert!(
@@ -45,16 +45,16 @@ impl Server {
         let out = File::create(&log).expect("log file");
 
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_muninn"));
-        cmd.env("MUNINN_BIND", format!("127.0.0.1:{port}"))
-            .env("MUNINN_BUCKET", bucket)
-            .env("MUNINN_MODEL_CACHE", manifest.join(".fastembed_cache"))
+        cmd.env("BIND", format!("127.0.0.1:{port}"))
+            .env("BUCKET", bucket)
+            .env("MODEL_CACHE", manifest.join(".fastembed_cache"))
             .env("RUST_LOG", "info")
             // Outside the repo so a developer's .env is not picked up.
             .current_dir(std::env::temp_dir())
             .stdout(Stdio::from(out.try_clone().expect("log handle")))
             .stderr(Stdio::from(out));
         if let Some(model) = model {
-            cmd.env("MUNINN_EMBED_MODEL", model);
+            cmd.env("EMBED_MODEL", model);
         }
         let mut server = Server {
             child: cmd.spawn().expect("spawn muninn"),

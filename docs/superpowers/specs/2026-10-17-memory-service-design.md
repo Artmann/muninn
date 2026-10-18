@@ -70,7 +70,7 @@ conform to; where this document and that one differ, this one wins.
 ## Storage
 
 Everything lives in one S3 bucket. The bucket name comes from config
-(`MUNINN_BUCKET`, default `muninn`). There is no database. S3 is the only
+(`BUCKET`, default `muninn`). There is no database. S3 is the only
 place data is kept, and the in-memory search index is just a cache of what
 is in S3.
 
@@ -175,7 +175,7 @@ similarity is a dot product.
 
 ### Model is a config option
 
-The model is chosen by `MUNINN_EMBED_MODEL`. The service must handle
+The model is chosen by `EMBED_MODEL`. The service must handle
 multiple languages, so the default is multilingual. Supported values in
 v1, all from fastembed's built-in list:
 
@@ -217,7 +217,7 @@ later change (see Open for later). (Author's call.)
 ### Model files
 
 Model files are downloaded on first run into a cache directory from config
-(`MUNINN_MODEL_CACHE`, default `./.fastembed_cache`). The repo ships a
+(`MODEL_CACHE`, default `./.fastembed_cache`). The repo ships a
 `Dockerfile` that downloads the configured model at image build time into
 that directory, so a container start never needs network access to Hugging
 Face. If the model is missing and cannot be downloaded, the service fails
@@ -264,7 +264,7 @@ Vectors is for.
 ### S3 Vectors implementation
 
 Used when `VECTOR_STORE_TYPE` is `s3` (case-insensitive), in the
-vector bucket named by `MUNINN_VECTOR_BUCKET`, which is then required.
+vector bucket named by `VECTOR_BUCKET`, which is then required.
 Any other value than `memory` or `s3` is a startup error. S3 still holds all documents;
 the vector bucket holds only the search index.
 
@@ -282,7 +282,7 @@ the vector bucket holds only the search index.
   Puts are idempotent, so this repairs any vector a crash left out and
   keeps S3 the single source of truth.
 - LocalStack does not emulate S3 Vectors. Its tests run against real AWS
-  and are skipped unless `MUNINN_TEST_VECTOR_BUCKET` is set.
+  and are skipped unless `TEST_VECTOR_BUCKET` is set.
 
 ## Ingest
 
@@ -421,8 +421,8 @@ All errors are JSON: `{ "error": { "code": "...", "message": "..." } }`.
 
 - `axum` + `tokio`, `serde`, `aws-sdk-s3` + `aws-config`, `fastembed`,
   `tiktoken-rs`, `uuid` (v7), `time` or `chrono` for RFC 3339, `tracing`.
-- Config from env: `MUNINN_BUCKET`, `MUNINN_BIND` (default `0.0.0.0:8080`),
-  `MUNINN_EMBED_MODEL` (default `multilingual-e5-small`), `MUNINN_MODEL_CACHE`,
+- Config from env: `BUCKET`, `BIND` (default `0.0.0.0:8080`),
+  `EMBED_MODEL` (default `multilingual-e5-small`), `MODEL_CACHE`,
   plus standard `AWS_*` vars and `AWS_ENDPOINT_URL`
   for LocalStack. The S3 client uses path-style addressing when an endpoint
   override is set.

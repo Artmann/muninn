@@ -27,7 +27,7 @@ pub async fn store() -> S3Store {
 pub async fn store_with_bucket() -> (S3Store, String) {
     let mut env: HashMap<String, String> = std::env::vars().collect();
     let bucket = format!("muninn-test-{}", Uuid::now_v7());
-    env.insert("MUNINN_BUCKET".into(), bucket.clone());
+    env.insert("BUCKET".into(), bucket.clone());
     let cfg = Config::from_map(&env).expect("config");
     let store = S3Store::from_config(&cfg).await.expect("store");
     store.ensure_bucket().await.expect("bucket");

@@ -113,7 +113,7 @@ Every `meta.json` records which model produced its vector. On startup,
 datapoints embedded by a different model than the configured one are
 re-embedded and rewritten.
 
-Model files are downloaded once into `MUNINN_MODEL_CACHE`. The Dockerfile
+Model files are downloaded once into `MODEL_CACHE`. The Dockerfile
 downloads them at build time so containers start offline.
 
 ## Vector index
@@ -134,7 +134,7 @@ behind an `RwLock` with brute-force dot products. Good to low tens of
 thousands of datapoints per project.
 
 **Amazon S3 Vectors** (`VECTOR_STORE_TYPE=s3`, bucket from
-`MUNINN_VECTOR_BUCKET`):
+`VECTOR_BUCKET`):
 
 - One index per embedding model, named `muninn-<model>` with characters
   other than letters, digits and hyphens turned into `-`. Switching models
@@ -153,7 +153,7 @@ thousands of datapoints per project.
 1. Load `.env` from the working directory if present (variables already
    in the environment win), then config. Fail clearly if no AWS region is
    set.
-2. Load the embedding model or fail. With `MUNINN_DOWNLOAD_ONLY=1`, exit
+2. Load the embedding model or fail. With `DOWNLOAD_ONLY=1`, exit
    here; the Docker build uses this to bake the model into the image.
 3. Create the S3 client (path-style when an endpoint override is set) and
    the bucket if missing. With `VECTOR_STORE_TYPE=s3`, create the vector

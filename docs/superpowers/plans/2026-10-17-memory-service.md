@@ -17,7 +17,7 @@
 - All JSON fields are camelCase on the wire (`#[serde(rename_all = "camelCase")]`).
 - Error envelope is exactly `{ "error": { "code": "...", "message": "..." } }`, optional `details` inside `error`.
 - Error codes: `validation`, `recall-range-invalid`, `budget-conflict`, `batch-too-large`, `loading`, `internal`.
-- Config env vars: `MUNINN_BUCKET` (default `muninn`), `MUNINN_BIND` (default `0.0.0.0:8080`), `MUNINN_EMBED_MODEL` (default `multilingual-e5-small`), `MUNINN_MODEL_CACHE` (default `./.fastembed_cache`), `AWS_ENDPOINT_URL` (path-style when set).
+- Config env vars: `BUCKET` (default `muninn`), `BIND` (default `0.0.0.0:8080`), `EMBED_MODEL` (default `multilingual-e5-small`), `MODEL_CACHE` (default `./.fastembed_cache`), `AWS_ENDPOINT_URL` (path-style when set).
 - Model config names and dims: `multilingual-e5-small` 384, `multilingual-e5-base` 768, `bge-m3` 1024, `bge-small-en-v1.5` 384.
 - Budget levels: `low` 8000, `medium` 16000, `high` 24000, `extra-high` 32000. `limit` default 100, range 1..=200. Batch max 100 items.
 - S3 keys: `projects/{projectId}/datapoints/{id}/content`, `projects/{projectId}/datapoints/{id}/meta.json`, `projects/{projectId}/idempotency/{sha256hex(key)}`.
@@ -95,7 +95,7 @@ fn defaults_apply_when_env_unset() {
 }
 #[test]
 fn env_overrides() {
-    let m = HashMap::from([("MUNINN_BUCKET".into(), "b".into()), ("MUNINN_BIND".into(), "127.0.0.1:9000".into()), ("AWS_ENDPOINT_URL".into(), "http://localhost:4566".into())]);
+    let m = HashMap::from([("BUCKET".into(), "b".into()), ("BIND".into(), "127.0.0.1:9000".into()), ("AWS_ENDPOINT_URL".into(), "http://localhost:4566".into())]);
     let c = Config::from_map(&m).unwrap();
     assert_eq!(c.bucket, "b");
     assert_eq!(c.bind.port(), 9000);
@@ -103,7 +103,7 @@ fn env_overrides() {
 }
 #[test]
 fn bad_bind_is_error() {
-    assert!(Config::from_map(&HashMap::from([("MUNINN_BIND".into(), "nope".into())])).is_err());
+    assert!(Config::from_map(&HashMap::from([("BIND".into(), "nope".into())])).is_err());
 }
 ```
 
@@ -543,8 +543,8 @@ Use chrono's default serde for `DateTime<Utc>`, which emits RFC 3339 with `Z`. D
 - Modify: `src/main.rs` (download-only mode), `README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`
 
 **Interfaces:**
-- `main.rs`: if env `MUNINN_DOWNLOAD_ONLY=1`, construct `FastEmbedder` for the configured model and exit 0 without starting the server.
-- `Dockerfile`: stage 1 `rust:1-bookworm` builds `--release`; stage 2 `debian:bookworm-slim` with `ca-certificates`, copies the binary, `ENV MUNINN_MODEL_CACHE=/models`, `RUN MUNINN_DOWNLOAD_ONLY=1 /usr/local/bin/muninn`, `EXPOSE 8080`, `CMD ["muninn"]`. `ARG MUNINN_EMBED_MODEL=multilingual-e5-small` forwarded as `ENV`.
+- `main.rs`: if env `DOWNLOAD_ONLY=1`, construct `FastEmbedder` for the configured model and exit 0 without starting the server.
+- `Dockerfile`: stage 1 `rust:1-bookworm` builds `--release`; stage 2 `debian:bookworm-slim` with `ca-certificates`, copies the binary, `ENV MODEL_CACHE=/models`, `RUN DOWNLOAD_ONLY=1 /usr/local/bin/muninn`, `EXPOSE 8080`, `CMD ["muninn"]`. `ARG EMBED_MODEL=multilingual-e5-small` forwarded as `ENV`.
 
 - [ ] **Step 1: Write `tests/real_model.rs`**
 
