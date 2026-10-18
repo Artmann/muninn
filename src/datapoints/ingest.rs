@@ -258,11 +258,15 @@ impl DatapointService {
         let id = datapoint.id;
         let input = build_input(&datapoint.label, &datapoint.content, &datapoint.metadata);
         let embedder = infra.embedder.clone();
-        let vector = tokio::task::spawn_blocking(move || embedder.embed_passages(&[input]))
-            .await
-            .context("embedding task panicked")??
-            .pop()
-            .context("embedder returned no vector")?;
+        let content = datapoint.content.clone();
+        // Counting tokens in a large document takes long enough to stall the
+        // runtime, so it runs off it with the embedding.
+        let (mut vectors, content_tokens) = tokio::task::spawn_blocking(move || {
+            anyhow::Ok((embedder.embed_passages(&[input])?, count_tokens(&content)))
+        })
+        .await
+        .context("embedding task panicked")??;
+        let vector = vectors.pop().context("embedder returned no vector")?;
 
         let meta = Meta {
             id,
@@ -277,7 +281,7 @@ impl DatapointService {
                 dim: vector.len(),
                 vector: vector.clone(),
             },
-            content_tokens: count_tokens(&datapoint.content),
+            content_tokens,
             content_sha256: Some(content_hash(&datapoint.content)),
         };
         infra

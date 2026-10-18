@@ -52,18 +52,21 @@ async fn reembed(
 ) -> anyhow::Result<Meta> {
     let input = build_input(&meta.label, &content, &meta.metadata);
     let model = embedder.model_name().to_string();
-    let vector = tokio::task::spawn_blocking(move || embedder.embed_passages(&[input]))
-        .await
-        .context("embedding task panicked")??
-        .pop()
-        .context("embedder returned no vector")?;
+    meta.content_sha256 = Some(content_hash(&content));
+    // Counting tokens in a large document takes long enough to stall the
+    // runtime, so it runs off it with the embedding.
+    let (mut vectors, content_tokens) = tokio::task::spawn_blocking(move || {
+        anyhow::Ok((embedder.embed_passages(&[input])?, count_tokens(&content)))
+    })
+    .await
+    .context("embedding task panicked")??;
+    let vector = vectors.pop().context("embedder returned no vector")?;
     meta.embedding = StoredEmbedding {
         model,
         dim: vector.len(),
         vector,
     };
-    meta.content_tokens = count_tokens(&content);
-    meta.content_sha256 = Some(content_hash(&content));
+    meta.content_tokens = content_tokens;
     Ok(meta)
 }
 
