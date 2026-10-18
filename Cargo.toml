@@ -38,3 +38,9 @@ tower = { version = "0.5", features = ["util"] }
 # its own copy (a ~450 MB .pdb each on Windows). Keep it for our own code.
 [profile.dev.package."*"]
 debug = false
+
+# Line tables are enough for backtraces with file and line, and much
+# smaller than full debug info. Set `debug = true` locally to inspect
+# variables in a debugger.
+[profile.dev]
+debug = "line-tables-only"
