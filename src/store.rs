@@ -213,13 +213,20 @@ impl S3Store {
         .await
     }
 
+    /// A datapoint's content. Bytes that are not UTF-8, which the service
+    /// never writes, are replaced rather than failing every recall, retry
+    /// and restart that reads them.
     pub async fn get_content(&self, project: Uuid, id: Uuid) -> anyhow::Result<Option<String>> {
-        match self.get(&keys::content(project, id)).await? {
-            Some(bytes) => Ok(Some(
-                String::from_utf8(bytes).context("content is not valid UTF-8")?,
-            )),
-            None => Ok(None),
-        }
+        let key = keys::content(project, id);
+        Ok(self.get(&key).await?.map(|bytes| {
+            String::from_utf8(bytes).unwrap_or_else(|e| {
+                tracing::warn!(
+                    key,
+                    "content is not valid UTF-8; replacing the invalid bytes"
+                );
+                String::from_utf8_lossy(e.as_bytes()).into_owned()
+            })
+        }))
     }
 
     pub async fn put_meta(&self, meta: &Meta) -> anyhow::Result<()> {

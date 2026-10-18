@@ -118,3 +118,22 @@ async fn rebuild_skips_unparseable_meta() {
     assert_eq!(n, 1);
     assert_eq!(index.len(p), 1);
 }
+
+#[tokio::test]
+#[ignore]
+async fn rebuild_survives_content_that_is_not_utf8() {
+    // One damaged object must not stop the server from starting.
+    let (store, bucket) = common::store_with_bucket().await;
+    let (p, id) = (common::project(), Uuid::now_v7());
+    common::put_raw(&bucket, &muninn::store::keys::content(p, id), b"caf\xe9").await;
+    store.put_meta(&old_meta(p, id)).await.unwrap();
+
+    let index = MemoryIndex::new();
+    let n = rebuild_index(&store, &index, fake()).await.unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(index.len(p), 1);
+    assert_eq!(
+        store.get_content(p, id).await.unwrap().as_deref(),
+        Some("caf\u{fffd}")
+    );
+}
