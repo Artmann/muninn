@@ -412,6 +412,25 @@ async fn source_id_creates_then_dedupes_identical_resend() {
 
 #[tokio::test]
 #[ignore]
+async fn source_id_resend_with_float_metadata_dedupes() {
+    // Without exact float parsing this value drifts by one ulp each time it
+    // goes through JSON, so the stored metadata never matches the resend.
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let body = format!(
+        r#"{{"projectId":"{p}","sourceId":"crm-1","label":"L","content":"c","metadata":{{"score":0.98492726239266173}}}}"#
+    );
+    let (s1, b1) = common::post_raw(&app, "/api/v1/ingest", "application/json", body.clone()).await;
+    assert_eq!(s1, StatusCode::CREATED, "{b1}");
+    let (s2, b2) = common::post_raw(&app, "/api/v1/ingest", "application/json", body).await;
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    assert_eq!(b2["deduplicated"], true);
+    assert_eq!(b2["replaced"], false);
+    assert_eq!(common::index_len(&state, p).await, 1);
+}
+
+#[tokio::test]
+#[ignore]
 async fn source_id_resend_with_changes_replaces_and_keeps_omitted_fields() {
     let (app, state) = common::app().await;
     let p = common::project();
