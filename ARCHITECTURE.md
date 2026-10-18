@@ -27,7 +27,7 @@ reading the code. The full design with rationale is in
 
 There is no database. S3 holds everything. The search index is a copy of
 the vectors in S3: in memory by default, or in an Amazon S3 Vectors
-bucket when `MUNINN_VECTOR_BUCKET` is set. Either way it is refilled from
+bucket when `MUNINN_VECTOR_STORE_TYPE=s3`. Either way it is refilled from
 S3 on every start.
 
 ## Storage
@@ -133,7 +133,8 @@ over-fetches.
 behind an `RwLock` with brute-force dot products. Good to low tens of
 thousands of datapoints per project.
 
-**Amazon S3 Vectors** (when `MUNINN_VECTOR_BUCKET` is set):
+**Amazon S3 Vectors** (`MUNINN_VECTOR_STORE_TYPE=s3`, bucket from
+`MUNINN_VECTOR_BUCKET`):
 
 - One index per embedding model, named `muninn-<model>` with characters
   other than letters, digits and hyphens turned into `-`. Switching models
@@ -155,7 +156,7 @@ thousands of datapoints per project.
 2. Load the embedding model or fail. With `MUNINN_DOWNLOAD_ONLY=1`, exit
    here; the Docker build uses this to bake the model into the image.
 3. Create the S3 client (path-style when an endpoint override is set) and
-   the bucket if missing. With `MUNINN_VECTOR_BUCKET`, create the vector
+   the bucket if missing. With `MUNINN_VECTOR_STORE_TYPE=s3`, create the vector
    bucket and index if missing.
 4. Start serving, and in the background scan every `meta.json` into the
    index, 500 vectors per call. Datapoints embedded by another model are re-embedded from their

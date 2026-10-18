@@ -13,9 +13,35 @@ pub struct Config {
     pub embed_model: ModelChoice,
     pub model_cache: PathBuf,
     pub endpoint_url: Option<String>,
-    /// Amazon S3 Vectors bucket. When set, the index lives there instead
-    /// of in memory.
-    pub vector_bucket: Option<String>,
+    pub vector_store: VectorStore,
+}
+
+/// Where the vector index lives, from `MUNINN_VECTOR_STORE_TYPE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VectorStore {
+    /// In process, rebuilt from S3 on every start. The default.
+    Memory,
+    /// Amazon S3 Vectors, in the bucket named by `MUNINN_VECTOR_BUCKET`.
+    S3 { bucket: String },
+}
+
+impl VectorStore {
+    fn from_env(kind: Option<&str>, bucket: Option<&str>) -> anyhow::Result<VectorStore> {
+        match kind.map(|k| k.trim().to_ascii_lowercase()).as_deref() {
+            None | Some("") | Some("memory") => Ok(VectorStore::Memory),
+            Some("s3") => {
+                let bucket = bucket.map(str::trim).filter(|b| !b.is_empty()).context(
+                    "MUNINN_VECTOR_STORE_TYPE=s3 needs MUNINN_VECTOR_BUCKET to name the vector bucket",
+                )?;
+                Ok(VectorStore::S3 {
+                    bucket: bucket.to_string(),
+                })
+            }
+            Some(other) => {
+                anyhow::bail!("MUNINN_VECTOR_STORE_TYPE must be memory or s3, got {other:?}")
+            }
+        }
+    }
 }
 
 impl Config {
@@ -38,9 +64,10 @@ impl Config {
                 .context("MUNINN_EMBED_MODEL")?,
             model_cache: PathBuf::from(get("MUNINN_MODEL_CACHE").unwrap_or("./.fastembed_cache")),
             endpoint_url: get("AWS_ENDPOINT_URL").map(str::to_string),
-            vector_bucket: get("MUNINN_VECTOR_BUCKET")
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string),
+            vector_store: VectorStore::from_env(
+                get("MUNINN_VECTOR_STORE_TYPE"),
+                get("MUNINN_VECTOR_BUCKET"),
+            )?,
         })
     }
 }
@@ -59,18 +86,61 @@ mod tests {
         assert_eq!(c.embed_model.name(), "multilingual-e5-small");
         assert_eq!(c.model_cache, PathBuf::from("./.fastembed_cache"));
         assert_eq!(c.endpoint_url, None);
-        assert_eq!(c.vector_bucket, None);
+        assert_eq!(c.vector_store, VectorStore::Memory);
+    }
+
+    fn vector_env(pairs: &[(&str, &str)]) -> anyhow::Result<Config> {
+        let m = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Config::from_map(&m)
     }
 
     #[test]
-    fn vector_bucket_set_or_blank() {
-        let set = HashMap::from([("MUNINN_VECTOR_BUCKET".into(), "vecs".into())]);
+    fn vector_store_s3_uses_bucket() {
+        let c = vector_env(&[
+            ("MUNINN_VECTOR_STORE_TYPE", "S3"),
+            ("MUNINN_VECTOR_BUCKET", "vecs"),
+        ])
+        .unwrap();
         assert_eq!(
-            Config::from_map(&set).unwrap().vector_bucket.as_deref(),
-            Some("vecs")
+            c.vector_store,
+            VectorStore::S3 {
+                bucket: "vecs".into()
+            }
         );
-        let blank = HashMap::from([("MUNINN_VECTOR_BUCKET".into(), " ".into())]);
-        assert_eq!(Config::from_map(&blank).unwrap().vector_bucket, None);
+    }
+
+    #[test]
+    fn vector_store_s3_without_bucket_is_error() {
+        for bucket in [None, Some(" ")] {
+            let mut pairs = vec![("MUNINN_VECTOR_STORE_TYPE", "s3")];
+            pairs.extend(bucket.map(|b| ("MUNINN_VECTOR_BUCKET", b)));
+            let err = format!("{:#}", vector_env(&pairs).unwrap_err());
+            assert!(err.contains("MUNINN_VECTOR_BUCKET"), "{err}");
+        }
+    }
+
+    #[test]
+    fn vector_store_memory_ignores_bucket() {
+        let c = vector_env(&[
+            ("MUNINN_VECTOR_STORE_TYPE", "memory"),
+            ("MUNINN_VECTOR_BUCKET", "vecs"),
+        ])
+        .unwrap();
+        assert_eq!(c.vector_store, VectorStore::Memory);
+        let c = vector_env(&[("MUNINN_VECTOR_BUCKET", "vecs")]).unwrap();
+        assert_eq!(c.vector_store, VectorStore::Memory, "memory is the default");
+    }
+
+    #[test]
+    fn unknown_vector_store_is_error() {
+        let err = format!(
+            "{:#}",
+            vector_env(&[("MUNINN_VECTOR_STORE_TYPE", "pinecone")]).unwrap_err()
+        );
+        assert!(err.contains("MUNINN_VECTOR_STORE_TYPE"), "{err}");
     }
 
     #[test]

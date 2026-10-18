@@ -21,7 +21,7 @@ the same or other agents as things happen.
 - Recall is semantic search with a relevance-ordered, budget-fitted result.
 - Vector search is behind a trait. The default implementation is in-memory
   and is rebuilt from S3 on startup. Amazon S3 Vectors is the second,
-  chosen by setting `MUNINN_VECTOR_BUCKET`; nothing in the API depends on
+  chosen by `MUNINN_VECTOR_STORE_TYPE=s3` (default `memory`); nothing in the API depends on
   which one runs.
 
 ## Non-goals (for now)
@@ -263,7 +263,9 @@ Vectors is for.
 
 ### S3 Vectors implementation
 
-Used when `MUNINN_VECTOR_BUCKET` is set. S3 still holds all documents;
+Used when `MUNINN_VECTOR_STORE_TYPE` is `s3` (case-insensitive), in the
+vector bucket named by `MUNINN_VECTOR_BUCKET`, which is then required.
+Any other value than `memory` or `s3` is a startup error. S3 still holds all documents;
 the vector bucket holds only the search index.
 
 - Index name: `muninn-` plus the model name, lowercased, with anything
