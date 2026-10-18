@@ -1,6 +1,6 @@
 //! Runs against real Amazon S3 Vectors; LocalStack does not emulate it.
 //! Set `TEST_VECTOR_BUCKET` and AWS credentials/region (without
-//! `AWS_ENDPOINT_URL`), then `cargo test --test s3vectors -- --ignored`.
+//! `AWS_ENDPOINT_URL`), then `cargo test --test it s3vectors:: -- --ignored`.
 //! Creates a throwaway index in that bucket and deletes it afterwards.
 
 use muninn::index::{S3VectorsIndex, VectorIndex, index_name};

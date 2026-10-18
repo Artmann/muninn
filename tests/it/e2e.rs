@@ -2,15 +2,13 @@
 //!
 //! ```sh
 //! set -a; . ./.env.example; set +a
-//! cargo test --test e2e -- --ignored
+//! cargo test --test it e2e:: -- --ignored
 //! ```
 //!
 //! Server logs go to `target/e2e-logs/`.
 
-mod e2e_support;
-
+use crate::e2e_support::{Server, labels};
 use chrono::{Duration, Utc};
-use e2e_support::{Server, labels};
 use serde_json::{Value, json};
 use uuid::Uuid;
 

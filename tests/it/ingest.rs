@@ -1,5 +1,4 @@
-mod common;
-
+use crate::common;
 use std::sync::atomic::Ordering;
 
 use axum::http::StatusCode;

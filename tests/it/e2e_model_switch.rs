@@ -4,12 +4,10 @@
 //!
 //! ```sh
 //! set -a; . ./.env.example; set +a
-//! cargo test --test e2e_model_switch -- --ignored
+//! cargo test --test it e2e_model_switch:: -- --ignored
 //! ```
 
-mod e2e_support;
-
-use e2e_support::{Server, labels};
+use crate::e2e_support::{Server, labels};
 use muninn::config::Config;
 use muninn::store::S3Store;
 use serde_json::json;
