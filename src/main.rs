@@ -72,6 +72,39 @@ async fn main() -> anyhow::Result<()> {
         state.embedder.clone(),
         state.ready.clone(),
     );
-    axum::serve(listener, muninn::api::router(state)).await?;
+    axum::serve(listener, muninn::api::router(state))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    tracing::info!("shut down");
     Ok(())
+}
+
+/// Ctrl-C, or SIGTERM from `docker stop` and orchestrators. In-flight
+/// requests finish before the process exits.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %e, "cannot listen for ctrl-c");
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "cannot listen for SIGTERM");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
+    tracing::info!("shutting down");
 }

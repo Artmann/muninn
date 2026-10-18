@@ -2,3 +2,9 @@ target
 .fastembed_cache
 .git
 .superpowers
+.env
+.env.*
+!.env.example
+docs
+tests
+*.md

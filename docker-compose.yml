@@ -5,3 +5,24 @@ services:
       - "4566:4566"
     environment:
       - SERVICES=s3
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Muninn itself, against LocalStack. Off by default so `cargo run` can
+  # use port 8080; start it with `docker compose --profile app up`.
+  muninn:
+    profiles: ["app"]
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    depends_on:
+      localstack:
+        condition: service_healthy

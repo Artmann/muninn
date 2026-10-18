@@ -76,10 +76,14 @@ can't replace it; stop the server or use `CARGO_TARGET_DIR=target/e2e`.
 ## Docker
 
 ```sh
-docker build -t muninn .
-docker run --rm -p 8080:8080 --env-file .env.example \
-  -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
+docker compose --profile app up --build   # image + LocalStack, on :8080
 ```
+
+The `muninn` service is behind the `app` profile so a plain
+`docker compose up -d` starts only LocalStack, leaving port 8080 free for
+`cargo run`. The build uses BuildKit cache mounts for the cargo registry
+and target directory, so rebuilds after a source change only recompile
+muninn. The runtime image runs as the unprivileged `muninn` user.
 
 The build runs the binary once with `DOWNLOAD_ONLY=1` to bake the
 model into `/models`. Both stages use Debian trixie: the prebuilt ONNX
