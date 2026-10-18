@@ -282,27 +282,6 @@ the vector bucket holds only the search index.
 - LocalStack does not emulate S3 Vectors. Its tests run against real AWS
   and are skipped unless `MUNINN_TEST_VECTOR_BUCKET` is set.
 
-### S3 Vectors implementation
-
-Used when `MUNINN_VECTOR_BUCKET` is set. S3 still holds all documents;
-the vector bucket holds only the search index.
-
-- Index name: `muninn-` plus the model name, lowercased, with anything
-  other than letters, digits and hyphens replaced by `-` (for example
-  `muninn-multilingual-e5-small`). One index per model, so a model switch
-  starts a fresh index and leaves the old one unused.
-- On startup the vector bucket and index are created if missing (float32,
-  cosine, the model's dimension). An existing index with a different
-  dimension is a startup error.
-- Each vector is keyed by datapoint id with filterable metadata
-  `projectId`. Search filters on `projectId`, pages through results until
-  it has `k`, and reports `1 - distance` as the score.
-- The startup scan still runs and re-puts every vector in batches of 500.
-  Puts are idempotent, so this repairs any vector a crash left out and
-  keeps S3 the single source of truth.
-- LocalStack does not emulate S3 Vectors. Its tests run against real AWS
-  and are skipped unless `MUNINN_TEST_VECTOR_BUCKET` is set.
-
 ## Ingest
 
 `POST /api/v1/ingest`
