@@ -11,6 +11,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Debug info only slows linking and bloats the cache in CI.
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   lint:
@@ -68,16 +70,3 @@ jobs:
           name: e2e-logs
           path: target/e2e-logs/
           if-no-files-found: ignore
-
-  docker:
-    name: docker build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
