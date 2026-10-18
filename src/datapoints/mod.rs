@@ -31,6 +31,19 @@ impl DatapointService {
     }
 }
 
+/// Run a write to completion even if the caller stops waiting. axum drops
+/// a handler when its client disconnects, and a write stopped between its
+/// steps would leave storage and the index disagreeing until the next start.
+async fn detached<T, E>(work: impl Future<Output = Result<T, E>> + Send + 'static) -> Result<T, E>
+where
+    T: Send + 'static,
+    E: From<anyhow::Error> + Send + 'static,
+{
+    tokio::spawn(work)
+        .await
+        .map_err(|e| E::from(anyhow::Error::new(e).context("write task failed")))?
+}
+
 /// The in-process lock serialising writes and deletes of one datapoint.
 fn datapoint_lock(project: Uuid, id: Uuid) -> String {
     format!("{project}:datapoint:{id}")

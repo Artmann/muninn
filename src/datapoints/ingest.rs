@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Context;
 use chrono::Utc;
 
-use super::{DatapointService, datapoint_lock};
+use super::{DatapointService, datapoint_lock, detached};
 use crate::datapoints::{Datapoint, Meta, NewDatapoint, StoredEmbedding, content_hash};
 use crate::embed::build_input;
 use crate::error::{ItemError, ServiceError};
@@ -144,8 +144,19 @@ impl DatapointService {
     /// it and `key` is ignored. With an idempotency key, a repeat of the same
     /// request returns the original datapoint, a half-finished earlier attempt
     /// is completed under the id it already reserved, and a different request
-    /// reusing the key is rejected.
+    /// reusing the key is rejected. Runs to the end even if the caller
+    /// stops waiting.
     pub(crate) async fn ingest_one(
+        &self,
+        new: NewDatapoint,
+        key: Option<&str>,
+    ) -> Result<Ingested, ServiceError> {
+        let this = self.clone();
+        let key = key.map(str::to_owned);
+        detached(async move { this.store_one(new, key.as_deref()).await }).await
+    }
+
+    async fn store_one(
         &self,
         new: NewDatapoint,
         key: Option<&str>,

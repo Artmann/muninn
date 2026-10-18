@@ -1,7 +1,7 @@
 use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
-use super::{DatapointService, datapoint_lock};
+use super::{DatapointService, datapoint_lock, detached};
 use crate::datapoints::source_uuid;
 use crate::error::ServiceError;
 
@@ -48,7 +48,8 @@ impl DatapointService {
             .chain(cmd.ids.into_iter().map(|id| (id, None)));
         let results = futures::stream::iter(targets)
             .map(|(id, source_id)| async move {
-                let deleted = self.delete_one(project, id).await?;
+                let this = self.clone();
+                let deleted = detached(async move { this.delete_one(project, id).await }).await?;
                 anyhow::Ok(Deleted {
                     id,
                     source_id,

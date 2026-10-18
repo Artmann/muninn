@@ -6,6 +6,7 @@ mod common;
 mod e2e_support;
 
 mod boot;
+mod cancel;
 mod datapoints;
 mod delete;
 mod e2e;
