@@ -155,6 +155,30 @@ per-project lock in the process to keep the limit of 20.
 The budget is `level` (8k/16k/24k/32k) or `maxTokens`, never both.
 Documents are whole or omitted, never cut.
 
+## Listing
+
+`GET /api/v1/datapoints` is for debugging: it shows what is stored for a
+project. It reads S3 directly and never touches the index, so it works
+while the index is still loading.
+
+1. With a `sourceId`, compute its id and read that one `meta.json`. No
+   listing.
+2. Otherwise list the project's `meta.json` keys from S3 in key order,
+   starting after the cursor, and read each one, 16 at a time. Keep those
+   that match the filters: `audience` (`project` means none), `label` as a
+   case-insensitive substring, and `occurredFrom`/`occurredTo`.
+3. Stop when the page has `limit` items (1 to 200, default 50), the
+   project runs out, or 1000 datapoints have been read. Without filters
+   only as many as the page needs are read.
+4. The cursor is the id of the last datapoint read. It is `null` only
+   when the project is exhausted.
+5. With `includeContent=true`, download `content` for each item.
+   Each item has the `meta.json` fields without the vector.
+
+Pages are in id order, not time order, because that is the order S3 can
+list incrementally with `StartAfter`. With narrow filters the scan cap
+can return a short or empty page that still has a cursor.
+
 ## Embedding
 
 `fastembed` runs ONNX models on the CPU. The model is a config option;
@@ -220,8 +244,9 @@ thousands of datapoints per project.
    index, 500 vectors per call. Datapoints embedded by another model are re-embedded from their
    content and their `meta.json` rewritten. A `meta.json` that does not
    parse, or whose content is missing when it needs re-embedding, is
-   logged and skipped. `/healthz` reports `loading` and ingest/recall return
-   `503` until the scan finishes. If the scan fails the process exits
+   logged and skipped. `/healthz` reports `loading`, and ingest, recall,
+   delete and webhook events return `503` until the scan finishes. Listing
+   datapoints and managing webhooks keep working. If the scan fails the process exits
    rather than serve a partial index.
 
 ## Error envelope
