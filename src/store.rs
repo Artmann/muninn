@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::aws_error::{explain, s3_permissions};
 use anyhow::Context;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
@@ -155,7 +156,7 @@ impl S3Store {
             .body(ByteStream::from(body))
             .send()
             .await
-            .with_context(|| format!("putting {key}"))?;
+            .map_err(|e| explain(e, format!("putting {key}"), &s3_permissions(&self.bucket)))?;
         Ok(())
     }
 
@@ -177,7 +178,11 @@ impl S3Store {
                 Ok(Some(bytes.to_vec()))
             }
             Err(e) if e.as_service_error().is_some_and(|se| se.is_no_such_key()) => Ok(None),
-            Err(e) => Err(e).with_context(|| format!("getting {key}")),
+            Err(e) => Err(explain(
+                e,
+                format!("getting {key}"),
+                &s3_permissions(&self.bucket),
+            )),
         }
     }
 
@@ -258,7 +263,11 @@ impl S3Store {
                 }
                 anyhow::bail!("marker {object_key} reported as existing but could not be read")
             }
-            Err(e) => Err(e).with_context(|| format!("creating marker {object_key}")),
+            Err(e) => Err(explain(
+                e,
+                format!("creating marker {object_key}"),
+                &s3_permissions(&self.bucket),
+            )),
         }
     }
 
@@ -273,7 +282,13 @@ impl S3Store {
             .into_paginator()
             .send();
         while let Some(page) = pages.next().await {
-            let page = page.context("listing objects")?;
+            let page = page.map_err(|e| {
+                explain(
+                    e,
+                    format!("listing objects in {}", self.bucket),
+                    &s3_permissions(&self.bucket),
+                )
+            })?;
             for obj in page.contents() {
                 if let Some(parsed) = obj.key().and_then(keys::parse_meta_key) {
                     found.push(parsed);

@@ -1,4 +1,5 @@
 pub mod api;
+pub mod aws_error;
 pub mod boot;
 pub mod config;
 pub mod domain;

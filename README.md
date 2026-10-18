@@ -20,6 +20,14 @@ Early but working: everything below is implemented and tested. See
 
 ## Quick start
 
+With Docker only, no Rust toolchain needed:
+
+```sh
+docker compose --profile app up --build  # LocalStack + Muninn
+```
+
+Or from source:
+
 ```sh
 docker compose up -d                     # LocalStack with S3
 cp .env.example .env                     # point the AWS SDK at LocalStack
@@ -31,17 +39,27 @@ The service listens on `http://localhost:8080`.
 ### Docker
 
 The image bakes the embedding model in at build time, so containers start
-without network access to the model hub.
+without network access to the model hub. It runs as a non-root user and
+shuts down cleanly on `docker stop`.
 
 ```sh
 docker build -t muninn .
 docker build -t muninn --build-arg EMBED_MODEL=bge-m3 .   # another model
-docker run -p 8080:8080 --env-file .env.example \
-  -e AWS_ENDPOINT_URL=http://host.docker.internal:4566 muninn
 ```
 
-Against real S3, pass your AWS credentials and region instead and leave
-`AWS_ENDPOINT_URL` unset.
+Against real AWS, pass credentials, region and buckets, and leave
+`AWS_ENDPOINT_URL` unset:
+
+```sh
+docker run -p 8080:8080 \
+  -e AWS_REGION=eu-west-3 -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+  -e BUCKET=my-muninn-bucket \
+  -e VECTOR_STORE_TYPE=s3 -e VECTOR_BUCKET=my-muninn-vectors \
+  muninn
+```
+
+`EMBED_MODEL` is fixed at build time: the image only contains the model
+it was built with.
 
 ## Configuration
 
@@ -72,6 +90,49 @@ need `s3vectors:GetIndex`, `CreateIndex`, `CreateVectorBucket`,
 can create the bucket yourself instead
 (`aws s3vectors create-vector-bucket --vector-bucket-name muninn-dev-vectors`)
 and drop `CreateVectorBucket`.
+
+### IAM permissions
+
+A policy for the credentials Muninn runs with. Replace `muninn`,
+`muninn-vectors`, the region and the account id with yours, and drop the
+`s3vectors` statement when the index lives in memory. When AWS denies a
+request, Muninn names the action and resource it was refused.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::muninn"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::muninn/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3vectors:GetIndex",
+        "s3vectors:CreateIndex",
+        "s3vectors:CreateVectorBucket",
+        "s3vectors:PutVectors",
+        "s3vectors:QueryVectors",
+        "s3vectors:GetVectors"
+      ],
+      "Resource": [
+        "arn:aws:s3vectors:eu-west-3:123456789012:bucket/muninn-vectors",
+        "arn:aws:s3vectors:eu-west-3:123456789012:bucket/muninn-vectors/*"
+      ]
+    }
+  ]
+}
+```
+
+The IAM console has no ready-made policy for S3 Vectors; create an inline
+policy on the user or role and paste this into the JSON editor.
 
 ### Embedding models
 

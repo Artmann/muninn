@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3vectors::Client;
 use aws_sdk_s3vectors::types::{DataType, DistanceMetric, PutInputVector, VectorData};
@@ -8,6 +7,7 @@ use aws_smithy_types::Document;
 use uuid::Uuid;
 
 use super::VectorIndex;
+use crate::aws_error::{explain, s3vectors_permissions};
 
 /// Most vectors one PutVectors call accepts.
 const PUT_BATCH: usize = 500;
@@ -21,6 +21,8 @@ pub struct S3VectorsIndex {
     client: Client,
     bucket: String,
     index: String,
+    /// Shown when AWS denies a request.
+    permissions: String,
 }
 
 /// Index name for a model: `muninn-` plus the model name with anything
@@ -64,8 +66,10 @@ impl S3VectorsIndex {
         model: &str,
         dim: usize,
     ) -> anyhow::Result<S3VectorsIndex> {
+        let region = sdk.region().map_or("<region>", |r| r.as_ref());
         let idx = S3VectorsIndex {
             client: Client::new(sdk),
+            permissions: s3vectors_permissions(region, &bucket),
             bucket,
             index: index_name(model),
         };
@@ -103,9 +107,11 @@ impl S3VectorsIndex {
                 if e.as_service_error()
                     .is_some_and(|e| e.is_not_found_exception()) => {}
             Err(e) => {
-                return Err(e).with_context(|| {
-                    format!("reading S3 Vectors index {}/{}", self.bucket, self.index)
-                });
+                return Err(explain(
+                    e,
+                    format!("reading S3 Vectors index {}/{}", self.bucket, self.index),
+                    &self.permissions,
+                ));
             }
         }
 
@@ -122,7 +128,11 @@ impl S3VectorsIndex {
                 if e.as_service_error()
                     .is_some_and(|e| e.is_conflict_exception()) => {}
             Err(e) => {
-                return Err(e).with_context(|| format!("creating vector bucket {}", self.bucket));
+                return Err(explain(
+                    e,
+                    format!("creating vector bucket {}", self.bucket),
+                    &self.permissions,
+                ));
             }
         }
         match self
@@ -143,9 +153,11 @@ impl S3VectorsIndex {
                 if e.as_service_error()
                     .is_some_and(|e| e.is_conflict_exception()) => {}
             Err(e) => {
-                return Err(e).with_context(|| {
-                    format!("creating S3 Vectors index {}/{}", self.bucket, self.index)
-                });
+                return Err(explain(
+                    e,
+                    format!("creating S3 Vectors index {}/{}", self.bucket, self.index),
+                    &self.permissions,
+                ));
             }
         }
         Ok(())
@@ -175,7 +187,9 @@ impl VectorIndex for S3VectorsIndex {
                         .build()?,
                 );
             }
-            req.send().await.context("S3 Vectors PutVectors")?;
+            req.send()
+                .await
+                .map_err(|e| explain(e, "S3 Vectors PutVectors".into(), &self.permissions))?;
         }
         Ok(())
     }
@@ -201,7 +215,7 @@ impl VectorIndex for S3VectorsIndex {
                 .set_next_token(token)
                 .send()
                 .await
-                .context("S3 Vectors QueryVectors")?;
+                .map_err(|e| explain(e, "S3 Vectors QueryVectors".into(), &self.permissions))?;
             for v in out.vectors() {
                 let Ok(id) = v.key().parse::<Uuid>() else {
                     tracing::warn!(key = v.key(), "vector key is not a uuid; skipping");
