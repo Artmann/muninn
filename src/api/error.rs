@@ -28,6 +28,14 @@ pub enum ApiError {
     IdempotencyKeyReused,
     #[error("request body is larger than 10 MiB")]
     PayloadTooLarge,
+    #[error("{0}")]
+    NotFound(String),
+    #[error("this webhook is paused")]
+    WebhookPaused,
+    #[error("webhook body is larger than 1 MiB")]
+    WebhookBodyTooLarge,
+    #[error("too many events for this webhook; at most 600 a minute")]
+    RateLimited,
     #[error("index is still loading from storage")]
     Loading,
     #[error("internal error")]
@@ -43,6 +51,10 @@ impl ApiError {
             ApiError::BatchTooLarge => "batch-too-large",
             ApiError::IdempotencyKeyReused => "idempotency-key-reused",
             ApiError::PayloadTooLarge => "payload-too-large",
+            ApiError::NotFound(_) => "not-found",
+            ApiError::WebhookPaused => "webhook-paused",
+            ApiError::WebhookBodyTooLarge => "webhook-body-too-large",
+            ApiError::RateLimited => "rate-limited",
             ApiError::Loading => "loading",
             ApiError::Internal(_) => "internal",
         }
@@ -56,7 +68,12 @@ impl ApiError {
             | ApiError::BudgetConflict
             | ApiError::BatchTooLarge => StatusCode::BAD_REQUEST,
             ApiError::IdempotencyKeyReused => StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            ApiError::PayloadTooLarge | ApiError::WebhookBodyTooLarge => {
+                StatusCode::PAYLOAD_TOO_LARGE
+            }
+            ApiError::NotFound(_) => StatusCode::NOT_FOUND,
+            ApiError::WebhookPaused => StatusCode::CONFLICT,
+            ApiError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             ApiError::Loading => StatusCode::SERVICE_UNAVAILABLE,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

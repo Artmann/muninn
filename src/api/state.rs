@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::api::ApiError;
 use crate::api::locks::KeyLocks;
+use crate::api::rate::RateLimiter;
 use crate::embed::Embedder;
 use crate::index::VectorIndex;
 use crate::store::S3Store;
@@ -16,6 +17,8 @@ pub struct AppState {
     /// False until the index has been rebuilt from storage.
     pub ready: Arc<AtomicBool>,
     pub locks: KeyLocks,
+    /// Events accepted per webhook per minute.
+    pub webhook_rate: RateLimiter,
 }
 
 impl AppState {

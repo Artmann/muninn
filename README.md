@@ -239,6 +239,98 @@ with the `id`, the `sourceId` when given, and `deleted`. `deleted` is
 Deleting a datapoint that was stored with an `idempotencyKey` and then
 retrying that same request stores it again.
 
+### Webhooks
+
+A webhook turns events that another service POSTs (Jira, GitHub, an alert
+system) into datapoints, without code in between. Each webhook belongs to
+a project and has a secret URL.
+
+#### Managing webhooks
+
+| Method and path                              | Does                                   |
+|----------------------------------------------|----------------------------------------|
+| `POST /api/v1/webhooks`                      | create; returns `201` with the URL     |
+| `GET /api/v1/webhooks?projectId=...`         | list a project's webhooks              |
+| `GET /api/v1/webhooks/{id}?projectId=...`    | one webhook                            |
+| `PUT /api/v1/webhooks/{id}`                  | replace its settings; URL unchanged    |
+| `DELETE /api/v1/webhooks/{id}?projectId=...` | delete; `{"deleted": false}` if absent |
+
+```json
+{
+  "projectId": "0192...uuid",
+  "name": "Jira support tickets",
+  "contentPath": "$.issue.fields.description",
+  "labelPath": "$.issue.fields.summary",
+  "occurredAtPath": "$.timestamp",
+  "idPath": "$.issue.key",
+  "audience": "support",
+  "filters": [
+    { "path": "$.webhookEvent", "op": "is-any-of", "values": ["jira:issue_created", "jira:issue_updated"] },
+    { "path": "$.issue.fields.labels", "op": "contains", "value": "customer" }
+  ],
+  "paused": false
+}
+```
+
+| Field            | Notes                                                                       |
+|------------------|-----------------------------------------------------------------------------|
+| `name`           | required, 1 to 64 characters; the label when there is no `labelPath`        |
+| `contentPath`    | required; `$` is the whole body. A string is used as is, anything else as JSON text |
+| `labelPath`      | label from the event; falls back to `name` when missing                     |
+| `occurredAtPath` | ISO 8601, or Unix seconds or milliseconds; falls back to the time received   |
+| `idPath`         | the sender's id for the event, 1 to 200 characters; see below               |
+| `audience`       | as in ingest                                                                |
+| `filters`        | up to 20; all must match                                                    |
+| `paused`         | a paused webhook refuses events with `409`                                  |
+
+Paths are JSON paths made of `$`, `.name`, `['name']` and `[n]`, up to 500
+characters. Wildcards, `..`, filters, slices and unions are rejected.
+
+Filter operators, all case-sensitive:
+
+| `op`        | Matches when the value at `path`                                  |
+|-------------|-------------------------------------------------------------------|
+| `is`        | equals `value`; objects and arrays never match                    |
+| `is-any-of` | equals one of `values` (1 to 50)                                  |
+| `contains`  | is a string containing `value`, or an array with an element equal to it |
+| `exists`    | is present and not `null`                                         |
+
+A path that is missing matches no filter.
+
+Creating a webhook returns its settings plus a `path` like
+`/api/v1/webhooks/whk_.../<token>`. Prefix it with Muninn's public address
+and give it to the sender. The token is the only credential: there is no
+signature check. It is stored hashed and not shown again; to replace it,
+delete the webhook and create a new one. A project holds at most 20
+webhooks.
+
+#### Receiving events
+
+`POST /api/v1/webhooks/{id}/{token}` with any content type, up to 1 MiB.
+
+- Ingested: `202` with
+  `{"eventId": "evt_...", "verdict": "ingested", "droppedBy": null, "datapointId": "...", "unchanged": false}`.
+- Dropped: `200` with `"verdict": "dropped"` and `droppedBy` saying why:
+  the first filter that failed, like `"$.webhookEvent is jira:issue_created"`,
+  or the path that resolved to nothing. Senders should not retry these.
+
+Datapoints get metadata `{"source": "webhook", "webhookId": "whk_..."}`.
+With an `idPath`, the datapoint's `sourceId` is `{webhookId}:{id}`, so a
+later event with the same id replaces it, and it can be deleted by that
+`sourceId`. Without one, an event that maps to exactly the same datapoint
+as an earlier one is not stored twice. Either way a resend that changes
+nothing returns `"unchanged": true`.
+
+A body that is not JSON is the content as a whole, unless the webhook has
+filters, in which case it is dropped.
+
+| HTTP | code                     | when                                          |
+|------|--------------------------|-----------------------------------------------|
+| 404  | `not-found`              | wrong id or token, or the webhook was deleted |
+| 409  | `webhook-paused`         | the webhook is paused                         |
+| 413  | `webhook-body-too-large` | body over 1 MiB                               |
+| 429  | `rate-limited`           | over 600 events a minute for this webhook     |
+
 ### `POST /api/v1/recall`
 
 ```json

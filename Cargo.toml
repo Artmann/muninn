@@ -27,9 +27,14 @@ tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.7", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v5", "v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
 reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
 tower = { version = "0.5", features = ["util"] }
+
+# Debug info for dependencies is most of target/: every test binary gets
+# its own copy (a ~450 MB .pdb each on Windows). Keep it for our own code.
+[profile.dev.package."*"]
+debug = false

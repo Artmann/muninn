@@ -23,6 +23,7 @@ reading the code. The full design with rationale is in
                           projects/{projectId}/datapoints/{id}/content
                           projects/{projectId}/datapoints/{id}/meta.json
                           projects/{projectId}/idempotency/{sha256(key)}
+                          webhooks/{webhookId}.json
 ```
 
 There is no database. S3 holds everything. The search index is a copy of
@@ -47,6 +48,10 @@ idempotency key.
   mapping a caller's key to the datapoint it produced and a hash of the
   request that produced it. The key is SHA-256 hashed so
   any string works as an S3 object name. Markers are per project.
+
+Webhooks are one object each, `webhooks/{id}.json`, holding the project,
+the settings and the SHA-256 of the URL token. They sit outside
+`projects/` because an event's URL names the webhook but not its project.
 
 `meta.json` is the source of truth. A datapoint exists when its
 `meta.json` exists. Startup lists all `meta.json` objects and ignores
@@ -107,6 +112,27 @@ indexes again, never a vector pointing at nothing.
 Idempotency markers are not deleted, since nothing maps an id back to its
 key. A retry of the original keyed request finds a marker whose datapoint
 is gone, takes it for a crashed attempt, and stores the datapoint again.
+
+## Webhooks
+
+An event for `/api/v1/webhooks/{id}/{token}`:
+
+1. Refuse an id that is not `whk_` plus 32 hex digits, so nothing else
+   reaches S3. Load `webhooks/{id}.json` and compare the token's hash.
+   A missing webhook and a wrong token are the same `404`.
+2. Refuse bodies over 1 MiB, paused webhooks, and webhooks over 600 events
+   in the current minute. The count is in memory, per process.
+3. Parse the body as JSON. Check the filters in order and drop the event
+   at the first that fails. Resolve the content path, then the optional
+   label, time and id paths. A body that is not JSON is the content as is.
+4. Ingest the result as a single datapoint. With an id, the `sourceId` is
+   `{webhookId}:{id}` and the upsert above replaces or dedupes it. Without
+   one, the idempotency key is `webhook:{webhookId}:{fingerprint}`, so an
+   event mapping to the same datapoint dedupes.
+
+Listing a project's webhooks reads every webhook in the bucket and filters
+on the project, which is fine at the expected scale. Creating one takes a
+per-project lock in the process to keep the limit of 20.
 
 ## Recall
 
@@ -206,7 +232,11 @@ thousands of datapoints per project.
 | 400  | `recall-range-invalid` | `occurredFrom > occurredTo`                   |
 | 400  | `budget-conflict`      | both `level` and `maxTokens`                  |
 | 400  | `batch-too-large`      | more than 100 items                           |
+| 404  | `not-found`            | unknown webhook, or wrong webhook token       |
+| 409  | `webhook-paused`       | event for a paused webhook                    |
 | 413  | `payload-too-large`    | request body over 10 MiB                      |
+| 413  | `webhook-body-too-large` | webhook event over 1 MiB                    |
+| 429  | `rate-limited`         | over 600 events a minute for one webhook      |
 | 422  | `idempotency-key-reused` | key already used with a different request   |
 | 503  | `loading`              | index not yet rebuilt from S3                 |
 | 500  | `internal`             | S3 or model failure; details in logs only     |
@@ -216,6 +246,8 @@ thousands of datapoints per project.
 - With the in-memory index, one process owns the index. Two instances
   would each need to rebuild from S3 and would not see each other's
   writes until restart. With S3 Vectors they share it.
+- Webhook rate limits are counted per process, so each instance allows
+  600 events a minute.
 - Idempotency across two processes on an S3 that ignores conditional puts
   is best effort.
 - Long documents are searchable by their first 512 tokens unless `bge-m3`

@@ -64,6 +64,7 @@ pub async fn app() -> (axum::Router, AppState) {
         embedder: Arc::new(FakeEmbedder::new(64)),
         ready: Arc::new(AtomicBool::new(true)),
         locks: KeyLocks::default(),
+        webhook_rate: Default::default(),
     };
     (muninn::api::router(state.clone()), state)
 }
@@ -72,6 +73,36 @@ pub async fn post(router: &axum::Router, path: &str, body: Value) -> (StatusCode
     let req = Request::post(path)
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
+        .unwrap();
+    send(router, req).await
+}
+
+/// Any method with an optional JSON body.
+pub async fn call(
+    router: &axum::Router,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let req = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
+        .unwrap();
+    send(router, req).await
+}
+
+/// POST raw bytes, as a third-party webhook sender would.
+pub async fn post_raw(
+    router: &axum::Router,
+    path: &str,
+    content_type: &str,
+    body: impl Into<Body>,
+) -> (StatusCode, Value) {
+    let req = Request::post(path)
+        .header("content-type", content_type)
+        .body(body.into())
         .unwrap();
     send(router, req).await
 }

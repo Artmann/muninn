@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         embedder: Arc::new(embedder),
         ready: Arc::new(AtomicBool::new(false)),
         locks: KeyLocks::default(),
+        webhook_rate: Default::default(),
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;

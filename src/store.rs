@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::domain::Meta;
+use crate::webhook::Webhook;
 
 /// Object key layout. See ARCHITECTURE.md.
 pub mod keys {
@@ -32,6 +33,12 @@ pub mod keys {
     pub fn marker(project: Uuid, key: &str) -> String {
         let digest = Sha256::digest(key.as_bytes());
         format!("projects/{project}/idempotency/{}", hex::encode(digest))
+    }
+
+    /// A webhook's settings. Webhooks sit outside `projects/` because an
+    /// event's URL names the webhook but not its project.
+    pub fn webhook(id: &str) -> String {
+        format!("webhooks/{id}.json")
     }
 
     /// `(project, id)` from a `meta.json` key, or `None` for any other key.
@@ -289,14 +296,62 @@ impl S3Store {
         }
     }
 
-    /// Every datapoint's metadata across all projects.
-    pub async fn list_metas(&self) -> anyhow::Result<Vec<Meta>> {
-        let mut found = Vec::new();
+    pub async fn put_webhook(&self, webhook: &Webhook) -> anyhow::Result<()> {
+        self.put(
+            keys::webhook(&webhook.id),
+            serde_json::to_vec(webhook)?,
+            "application/json",
+        )
+        .await
+    }
+
+    pub async fn get_webhook(&self, id: &str) -> anyhow::Result<Option<Webhook>> {
+        let key = keys::webhook(id);
+        match self.get(&key).await? {
+            Some(bytes) => Ok(Some(
+                serde_json::from_slice(&bytes).with_context(|| format!("parsing {key}"))?,
+            )),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn delete_webhook(&self, id: &str) -> anyhow::Result<()> {
+        self.delete(keys::webhook(id)).await
+    }
+
+    /// A project's webhooks, oldest first. Reads every webhook in the
+    /// bucket, which is fine at a few dozen projects.
+    pub async fn list_webhooks(&self, project: Uuid) -> anyhow::Result<Vec<Webhook>> {
+        let keys = self.list_keys("webhooks/").await?;
+        let raw: Vec<(String, Option<Vec<u8>>)> = futures::stream::iter(keys)
+            .map(|key| async move { self.get(&key).await.map(|bytes| (key, bytes)) })
+            .buffer_unordered(16)
+            .try_collect()
+            .await?;
+        let mut found: Vec<Webhook> = raw
+            .into_iter()
+            .filter_map(
+                |(key, bytes)| match serde_json::from_slice::<Webhook>(&bytes?) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        tracing::warn!(key, error = %e, "unparseable webhook; skipping");
+                        None
+                    }
+                },
+            )
+            .filter(|w| w.project_id == project)
+            .collect();
+        found.sort_by_key(|w| w.created_at);
+        Ok(found)
+    }
+
+    async fn list_keys(&self, prefix: &str) -> anyhow::Result<Vec<String>> {
+        let mut keys = Vec::new();
         let mut pages = self
             .client
             .list_objects_v2()
             .bucket(&self.bucket)
-            .prefix("projects/")
+            .prefix(prefix)
             .into_paginator()
             .send();
         while let Some(page) = pages.next().await {
@@ -307,12 +362,23 @@ impl S3Store {
                     &s3_permissions(&self.bucket),
                 )
             })?;
-            for obj in page.contents() {
-                if let Some(parsed) = obj.key().and_then(keys::parse_meta_key) {
-                    found.push(parsed);
-                }
-            }
+            keys.extend(
+                page.contents()
+                    .iter()
+                    .filter_map(|o| o.key().map(String::from)),
+            );
         }
+        Ok(keys)
+    }
+
+    /// Every datapoint's metadata across all projects.
+    pub async fn list_metas(&self) -> anyhow::Result<Vec<Meta>> {
+        let found: Vec<(Uuid, Uuid)> = self
+            .list_keys("projects/")
+            .await?
+            .iter()
+            .filter_map(|key| keys::parse_meta_key(key))
+            .collect();
         let raw: Vec<(String, Option<Vec<u8>>)> = futures::stream::iter(found)
             .map(|(project, id)| async move {
                 let key = keys::meta(project, id);
