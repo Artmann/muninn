@@ -37,10 +37,12 @@ idempotency key.
 
 - **`content`**: the document exactly as sent, as plain text. Kept
   separate so recall only downloads the documents it will return.
-- **`meta.json`**: label, timestamp, metadata, audience, the embedding
-  vector with the model name and dimension, and the content token count.
-  Storing the vector and token count means a restart never has to run the
-  model or tokenizer over old data.
+- **`meta.json`**: sourceId, label, timestamp, metadata, audience, the
+  embedding vector with the model name and dimension, the content token
+  count, and a SHA-256 of the content. Storing the vector and token count
+  means a restart never has to run the model or tokenizer over old data.
+  The content hash lets a resend tell whether the content changed without
+  downloading it.
 - **idempotency marker**: a tiny JSON object `{"id": "...", "fingerprint": "..."}`
   mapping a caller's key to the datapoint it produced and a hash of the
   request that produced it. The key is SHA-256 hashed so
@@ -54,7 +56,15 @@ everything else.
 
 1. Validate the request. A `timestamp` more than 5 minutes ahead of the
    server clock is rejected: recall would not see it until then.
-2. If there is an idempotency key: mint an id and create the marker with a
+   An `audience` must be a slug; `project` is stored as no audience.
+2. If there is a `sourceId`, the id is the UUIDv5 of it in the project's
+   namespace, so every send of it lands on the same id with no lookup
+   table. Lock that id, read its `meta.json`, and fill fields the request
+   left out from it. If label, timestamp, metadata, audience, content hash
+   and model all match, re-insert the stored vector and return it as
+   deduplicated. Otherwise continue below, overwriting it. The idempotency
+   key is not used.
+3. If there is an idempotency key: mint an id and create the marker with a
    create-only put. If the marker already existed, read it. If its
    fingerprint differs from this request's, return
    `422 idempotency-key-reused`; reusing a key for a different request is
@@ -62,20 +72,41 @@ everything else.
    already has a `meta.json`, re-insert its vector into the index (in case
    an earlier attempt stopped before that) and return it as deduplicated.
    If not, a previous attempt crashed; continue below reusing that id.
-3. Build the embedding input: label, content, then one `key: value` line
+4. Build the embedding input: label, content, then one `key: value` line
    per metadata entry. Prefix per model (E5 wants `passage: `). Embed on a
    blocking thread.
-4. Count content tokens with `cl100k_base`.
-5. Write `content`, then `meta.json`, then insert the vector into the
-   index.
+5. Count content tokens with `cl100k_base`.
+6. Write `content`, then `meta.json`, then insert the vector into the
+   index. A replacement overwrites all three in place.
 
 Writing the marker first pins the id, so a retry after a crash at any step
-finishes the same datapoint instead of creating a second one. A per-key
-lock inside the process serialises concurrent duplicates.
+finishes the same datapoint instead of creating a second one. A `sourceId`
+pins the id by itself. A per-key lock inside the process serialises
+concurrent duplicates, and a per-id lock serialises writes and deletes of
+one `sourceId`.
+
+While a replacement is between writing `content` and `meta.json`, recall
+can return the new content with the old label and metadata. Since
+`meta.json` records the hash of the content it was built from, a retry
+after a crash there still sees a change and finishes the replacement.
 
 Batch ingest validates every item before writing anything, then runs each
 item as a single ingest with key `"{batchKey}#{index}"`. A retry completes
-unfinished items and dedupes finished ones.
+unfinished items and dedupes finished ones. Items with a `sourceId` skip
+the key. Validation checks that each `sourceId` item without a label
+names a stored datapoint or one created earlier in the batch.
+
+## Delete
+
+Each entry, 16 at a time: resolve a `sourceId` to its id, lock the id,
+and skip it if there is no `meta.json`. Otherwise remove the vector from
+the index, then delete `meta.json`, then `content`. Removing from the
+index first means a crash part way leaves a datapoint that the next start
+indexes again, never a vector pointing at nothing.
+
+Idempotency markers are not deleted, since nothing maps an id back to its
+key. A retry of the original keyed request finds a marker whose datapoint
+is gone, takes it for a crashed attempt, and stores the datapoint again.
 
 ## Recall
 
@@ -122,6 +153,7 @@ downloads them at build time so containers start offline.
 trait VectorIndex {
     async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> Result<()>;
     async fn upsert_many(&self, items: Vec<(Uuid, Uuid, Vec<f32>)>) -> Result<()>;
+    async fn remove(&self, project: Uuid, id: Uuid) -> Result<()>;
     async fn search(&self, project: Uuid, query: &[f32], k: usize) -> Result<Vec<(Uuid, f32)>>;
 }
 ```

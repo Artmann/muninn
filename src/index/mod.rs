@@ -22,6 +22,9 @@ pub trait VectorIndex: Send + Sync {
         Ok(())
     }
 
+    /// Drop the vector for `id`. Removing an id that is not there is fine.
+    async fn remove(&self, project: Uuid, id: Uuid) -> anyhow::Result<()>;
+
     /// The `k` best matches by dot product, highest score first.
     async fn search(
         &self,

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
-use crate::domain::{Meta, StoredEmbedding};
+use crate::domain::{Meta, StoredEmbedding, content_hash};
 use crate::embed::{Embedder, build_input};
 use crate::index::VectorIndex;
 use crate::store::S3Store;
@@ -63,6 +63,7 @@ async fn reembed(
         vector,
     };
     meta.content_tokens = count_tokens(&content);
+    meta.content_sha256 = Some(content_hash(&content));
     Ok(meta)
 }
 

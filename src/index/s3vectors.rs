@@ -194,6 +194,18 @@ impl VectorIndex for S3VectorsIndex {
         Ok(())
     }
 
+    async fn remove(&self, _project: Uuid, id: Uuid) -> anyhow::Result<()> {
+        self.client
+            .delete_vectors()
+            .vector_bucket_name(&self.bucket)
+            .index_name(&self.index)
+            .keys(id.to_string())
+            .send()
+            .await
+            .map_err(|e| explain(e, "S3 Vectors DeleteVectors".into(), &self.permissions))?;
+        Ok(())
+    }
+
     async fn search(
         &self,
         project: Uuid,

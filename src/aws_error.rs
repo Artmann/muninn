@@ -6,15 +6,16 @@ use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 /// What to grant when the document bucket denies access.
 pub fn s3_permissions(bucket: &str) -> String {
     format!(
-        "s3:ListBucket on arn:aws:s3:::{bucket} and s3:GetObject and s3:PutObject on \
-         arn:aws:s3:::{bucket}/*"
+        "s3:ListBucket on arn:aws:s3:::{bucket} and s3:GetObject, s3:PutObject and \
+         s3:DeleteObject on arn:aws:s3:::{bucket}/*"
     )
 }
 
 /// What to grant when the vector bucket denies access.
 pub fn s3vectors_permissions(region: &str, bucket: &str) -> String {
     format!(
-        "s3vectors:GetIndex, CreateIndex, PutVectors, QueryVectors and GetVectors on \
+        "s3vectors:GetIndex, CreateIndex, PutVectors, QueryVectors, GetVectors and \
+         DeleteVectors on \
          arn:aws:s3vectors:{region}:<account-id>:bucket/{bucket} and \
          arn:aws:s3vectors:{region}:<account-id>:bucket/{bucket}/*"
     )

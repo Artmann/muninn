@@ -160,6 +160,17 @@ impl S3Store {
         Ok(())
     }
 
+    async fn delete(&self, key: String) -> anyhow::Result<()> {
+        self.client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .send()
+            .await
+            .map_err(|e| explain(e, format!("deleting {key}"), &s3_permissions(&self.bucket)))?;
+        Ok(())
+    }
+
     async fn get(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>> {
         match self
             .client
@@ -221,6 +232,13 @@ impl S3Store {
             )),
             None => Ok(None),
         }
+    }
+
+    /// Delete a datapoint's `meta.json`, which makes it gone, then its
+    /// content. Deleting a missing datapoint is fine.
+    pub async fn delete_datapoint(&self, project: Uuid, id: Uuid) -> anyhow::Result<()> {
+        self.delete(keys::meta(project, id)).await?;
+        self.delete(keys::content(project, id)).await
     }
 
     /// Write the idempotency marker only if it does not exist yet. If another

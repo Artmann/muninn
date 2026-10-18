@@ -109,7 +109,7 @@ request, Muninn names the action and resource it was refused.
     },
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
       "Resource": "arn:aws:s3:::muninn/*"
     },
     {
@@ -120,7 +120,8 @@ request, Muninn names the action and resource it was refused.
         "s3vectors:CreateVectorBucket",
         "s3vectors:PutVectors",
         "s3vectors:QueryVectors",
-        "s3vectors:GetVectors"
+        "s3vectors:GetVectors",
+        "s3vectors:DeleteVectors"
       ],
       "Resource": [
         "arn:aws:s3vectors:eu-west-3:123456789012:bucket/muninn-vectors",
@@ -156,8 +157,8 @@ All requests and responses are JSON. Errors look like
 
 ```json
 {
-  "idempotencyKey": "optional",
   "projectId": "0192...uuid",
+  "sourceId": "slack:C024BE91L:1729166400.000100",
   "label": "Decided on S3 Vectors",
   "content": "We chose S3 Vectors over a separate vector DB because ...",
   "timestamp": "2026-10-17T12:00:00Z",
@@ -172,9 +173,36 @@ of ingest. A `timestamp` more than 5 minutes ahead of the server clock is
 rejected with `400 validation`, since recall only sees a datapoint once
 its timestamp has passed. `metadata` defaults to `{}`.
 
-Returns `201` with the stored datapoint. The server assigns the `id`.
+`audience` is a slug: 2 to 40 lowercase letters, digits and dashes,
+starting and ending with a letter or digit. Omitting it, or sending
+`project`, means the whole project; that is stored and returned as `null`.
 
-`idempotencyKey` makes retries safe. Sending the same request again with
+Returns `201` with the stored datapoint and `"deduplicated": false,
+"replaced": false`. The server assigns the `id`.
+
+#### Updating with `sourceId`
+
+`sourceId` is your own id for the datapoint, any non-blank string, unique
+per project. Send it to be able to correct or delete the datapoint later.
+
+- The first send creates the datapoint: `201`.
+- Sending it again with nothing changed returns `200` with
+  `"deduplicated": true`. This makes retries safe.
+- Sending it again with any change replaces the datapoint: `200` with
+  `"replaced": true`. The `id` stays the same.
+- On a resend, `label`, `timestamp`, `metadata` and `audience` can be left
+  out to keep their stored values. So `label` is only required the first
+  time. Send `"audience": "project"` to widen a stored audience back to
+  the whole project.
+
+The `id` is derived from the project and `sourceId`, so it is the same for
+every send. `sourceId` and `idempotencyKey` can't be combined, since a
+`sourceId` already makes retries safe.
+
+#### Retrying with `idempotencyKey`
+
+For datapoints without a `sourceId`, `idempotencyKey` makes retries safe.
+Sending the same request again with
 the same key returns `200` with the original datapoint and
 `"deduplicated": true`. Reusing a key for a different request returns
 `422 idempotency-key-reused` and stores nothing. Keys are scoped to the
@@ -192,7 +220,24 @@ array naming the failing indexes. Returns `200` with a per-item result
 list. With a batch key, a retry of the same
 batch after a partial failure finishes the unfinished items and does not
 duplicate the finished ones. An item that changed since the first attempt
-gets `422 idempotency-key-reused` in its result.
+gets `422 idempotency-key-reused` in its result. Items with a `sourceId`
+ignore the batch key and behave as in single ingest; a later item can
+update an earlier one with the same `sourceId`.
+
+### `POST /api/v1/delete`
+
+```json
+{ "projectId": "0192...uuid", "sourceIds": ["slack:C024BE91L:1729166400.000100"], "ids": ["0192...uuid"] }
+```
+
+Deletes datapoints by `sourceId`, by server `id`, or both: 1 to 1000 in
+total. Returns `200` with one result per entry, `sourceIds` first, each
+with the `id`, the `sourceId` when given, and `deleted`. `deleted` is
+`false` when nothing was stored under it; that is not an error. A deleted
+`sourceId` can be used again.
+
+Deleting a datapoint that was stored with an `idempotencyKey` and then
+retrying that same request stores it again.
 
 ### `POST /api/v1/recall`
 
@@ -232,7 +277,6 @@ recall return `503` with code `loading` until then.
 
 - Auth
 - Filtering on `audience`
-- Update and delete
 - Metadata filters on recall
 
 ## License

@@ -21,6 +21,7 @@ fn old_meta(project: Uuid, id: Uuid) -> Meta {
     Meta {
         id,
         project_id: project,
+        source_id: None,
         label: "label".into(),
         timestamp: Utc::now(),
         metadata: serde_json::Map::new(),
@@ -31,6 +32,7 @@ fn old_meta(project: Uuid, id: Uuid) -> Meta {
             vector: vec![1.0, 0.0, 0.0],
         },
         content_tokens: 0,
+        content_sha256: None,
     }
 }
 

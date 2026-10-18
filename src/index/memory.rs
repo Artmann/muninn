@@ -40,6 +40,14 @@ impl VectorIndex for MemoryIndex {
         Ok(())
     }
 
+    async fn remove(&self, project: Uuid, id: Uuid) -> anyhow::Result<()> {
+        let mut projects = self.projects.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(entries) = projects.get_mut(&project) {
+            entries.remove(&id);
+        }
+        Ok(())
+    }
+
     async fn search(
         &self,
         project: Uuid,
@@ -94,6 +102,19 @@ mod tests {
         assert_eq!(idx.len(p), 1);
         let hits = idx.search(p, &[0.0, 1.0], 10).await.unwrap();
         assert_eq!(hits, vec![(id, 1.0)]);
+    }
+
+    #[tokio::test]
+    async fn remove_drops_only_that_id() {
+        let idx = MemoryIndex::new();
+        let (p, a, b) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+        idx.upsert(p, a, vec![1.0]).await.unwrap();
+        idx.upsert(p, b, vec![1.0]).await.unwrap();
+        idx.remove(p, a).await.unwrap();
+        idx.remove(p, a).await.unwrap();
+        idx.remove(Uuid::now_v7(), b).await.unwrap();
+        let hits = idx.search(p, &[1.0], 10).await.unwrap();
+        assert_eq!(hits, vec![(b, 1.0)]);
     }
 
     #[tokio::test]

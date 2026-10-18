@@ -1,3 +1,4 @@
+pub mod delete;
 pub mod error;
 pub mod ingest;
 pub mod locks;
@@ -34,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ingest", post(ingest::handler))
         .route("/api/v1/ingest/batch", post(ingest::batch_handler))
         .route("/api/v1/recall", post(recall::handler))
+        .route("/api/v1/delete", post(delete::handler))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(state)

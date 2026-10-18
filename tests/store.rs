@@ -9,6 +9,7 @@ fn meta(project: Uuid, id: Uuid) -> Meta {
     Meta {
         id,
         project_id: project,
+        source_id: None,
         label: "label".into(),
         timestamp: Utc::now(),
         metadata: serde_json::Map::new(),
@@ -19,6 +20,7 @@ fn meta(project: Uuid, id: Uuid) -> Meta {
             vector: vec![0.6, 0.8],
         },
         content_tokens: 3,
+        content_sha256: None,
     }
 }
 

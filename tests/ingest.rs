@@ -388,3 +388,159 @@ async fn body_limit_is_ten_mib_with_json_errors() {
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(resp["error"]["code"], "payload-too-large");
 }
+
+#[tokio::test]
+#[ignore]
+async fn source_id_creates_then_dedupes_identical_resend() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let body = json!({ "projectId": p, "sourceId": "crm-1", "label": "L", "content": "c" });
+    let (s1, b1) = common::post(&app, "/api/v1/ingest", body.clone()).await;
+    assert_eq!(s1, StatusCode::CREATED, "{b1}");
+    assert_eq!(b1["sourceId"], "crm-1");
+    assert_eq!(b1["replaced"], false);
+    let id: Uuid = b1["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(id, muninn::domain::source_uuid(p, "crm-1"));
+
+    let (s2, b2) = common::post(&app, "/api/v1/ingest", body).await;
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    assert_eq!(b2["deduplicated"], true);
+    assert_eq!(b2["replaced"], false);
+    assert_eq!(b2["id"], b1["id"]);
+    assert_eq!(b2["timestamp"], b1["timestamp"], "stored time is kept");
+    assert_eq!(common::index_len(&state, p).await, 1);
+}
+
+#[tokio::test]
+#[ignore]
+async fn source_id_resend_with_changes_replaces_and_keeps_omitted_fields() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let (_, b1) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({
+            "projectId": p, "sourceId": "crm-1", "label": "L", "content": "old",
+            "timestamp": "2026-01-01T00:00:00Z", "metadata": { "k": "v" }, "audience": "eng"
+        }),
+    )
+    .await;
+    let (status, b2) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "sourceId": "crm-1", "content": "new" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{b2}");
+    assert_eq!(b2["replaced"], true);
+    assert_eq!(b2["deduplicated"], false);
+    assert_eq!(b2["id"], b1["id"]);
+    assert_eq!(b2["label"], "L");
+    assert_eq!(b2["timestamp"], "2026-01-01T00:00:00Z");
+    assert_eq!(b2["metadata"], json!({ "k": "v" }));
+    assert_eq!(b2["audience"], "eng");
+
+    let id: Uuid = b1["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        state.store.get_content(p, id).await.unwrap().as_deref(),
+        Some("new")
+    );
+    assert_eq!(common::index_len(&state, p).await, 1);
+
+    let (_, b3) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "sourceId": "crm-1", "content": "new", "audience": "project" }),
+    )
+    .await;
+    assert_eq!(b3["replaced"], true, "{b3}");
+    assert_eq!(b3["audience"], json!(null));
+}
+
+#[tokio::test]
+#[ignore]
+async fn replaced_content_is_what_recall_finds() {
+    let (app, _) = common::app().await;
+    let p = common::project();
+    for content in ["the old text", "the new text"] {
+        common::post(
+            &app,
+            "/api/v1/ingest",
+            json!({ "projectId": p, "sourceId": "doc", "label": "L", "content": content }),
+        )
+        .await;
+    }
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/recall",
+        json!({ "projectId": p, "query": "text" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let docs = body["results"].as_array().unwrap();
+    assert_eq!(docs.len(), 1, "{body}");
+    assert_eq!(docs[0]["content"], "the new text");
+    assert_eq!(docs[0]["sourceId"], "doc");
+}
+
+#[tokio::test]
+#[ignore]
+async fn source_id_rules() {
+    let (app, _) = common::app().await;
+    let p = common::project();
+    let cases = [
+        // A new sourceId needs a label.
+        json!({ "projectId": p, "sourceId": "new", "content": "c" }),
+        json!({ "projectId": p, "sourceId": " ", "label": "L", "content": "c" }),
+        json!({ "projectId": p, "sourceId": "s", "idempotencyKey": "k", "label": "L", "content": "c" }),
+        json!({ "projectId": p, "label": "L", "content": "c", "audience": "Engineering" }),
+    ];
+    for case in cases {
+        let (status, body) = common::post(&app, "/api/v1/ingest", case.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{case} -> {body}");
+        assert_eq!(body["error"]["code"], "validation", "{case}");
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_with_source_ids_upserts_and_checks_labels_up_front() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "idempotencyKey": "B", "items": [
+            { "projectId": p, "sourceId": "a", "label": "A", "content": "one" },
+            { "projectId": p, "sourceId": "a", "content": "two" },
+            { "projectId": p, "label": "keyed", "content": "three" }
+        ] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let r = &body["results"];
+    assert_eq!(r[0]["status"], 201, "{body}");
+    assert_eq!(r[1]["status"], 200);
+    assert_eq!(r[1]["replaced"], true);
+    assert_eq!(r[1]["datapoint"]["label"], "A");
+    assert_eq!(r[2]["status"], 201);
+    assert_eq!(common::index_len(&state, p).await, 2);
+
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "items": [
+            { "projectId": p, "sourceId": "a", "content": "fine, stored" },
+            { "projectId": p, "sourceId": "unknown", "content": "no label" }
+        ] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"][0]["index"], 1);
+    let id = muninn::domain::source_uuid(p, "a");
+    assert_eq!(
+        state.store.get_content(p, id).await.unwrap().as_deref(),
+        Some("two"),
+        "nothing written"
+    );
+}
