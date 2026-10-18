@@ -7,7 +7,7 @@ mod select;
 
 pub use select::{Candidate, Level, SelectParams, Selected, Selection, Sort, select};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
@@ -117,6 +117,13 @@ impl RecallService {
             .index
             .search(project, &qvec, (limit * 4).min(MAX_SEARCH_K))
             .await?;
+        // A backend that returns an id twice would otherwise have it selected
+        // twice and its metadata missing the second time.
+        let mut seen = HashSet::new();
+        let hits: Vec<_> = hits
+            .into_iter()
+            .filter(|(id, _)| seen.insert(*id))
+            .collect();
 
         let store = &self.infra.store;
         let metas: Vec<(f32, Option<Meta>)> = futures::stream::iter(hits)

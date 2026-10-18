@@ -247,3 +247,56 @@ async fn recall_skips_datapoint_with_missing_content() {
     assert_eq!(labels(&body), vec!["kept"]);
     assert_eq!(body["usedTokens"], body["results"][0]["contentTokens"]);
 }
+
+/// Returns every hit twice.
+struct DuplicatingIndex(muninn::index::MemoryIndex);
+
+#[async_trait::async_trait]
+impl muninn::index::VectorIndex for DuplicatingIndex {
+    async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> anyhow::Result<()> {
+        self.0.upsert(project, id, vector).await
+    }
+
+    async fn remove(&self, project: Uuid, id: Uuid) -> anyhow::Result<()> {
+        self.0.remove(project, id).await
+    }
+
+    async fn search(
+        &self,
+        project: Uuid,
+        query: &[f32],
+        k: usize,
+    ) -> anyhow::Result<Vec<(Uuid, f32)>> {
+        let hits = self.0.search(project, query, k).await?;
+        Ok(hits.iter().flat_map(|&h| [h, h]).collect())
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn recall_tolerates_duplicate_index_hits() {
+    let infra = muninn::app::Infra {
+        store: common::store().await,
+        index: std::sync::Arc::new(DuplicatingIndex(muninn::index::MemoryIndex::new())),
+        embedder: std::sync::Arc::new(muninn::embed::FakeEmbedder::new(64)),
+        ready: std::sync::Arc::new(true.into()),
+    };
+    let app = muninn::http::router(muninn::app::Services::new(infra));
+    let p = common::project();
+    ingest(
+        &app,
+        json!({ "projectId": p, "label": "a", "content": "one" }),
+    )
+    .await;
+    ingest(
+        &app,
+        json!({ "projectId": p, "label": "b", "content": "two" }),
+    )
+    .await;
+
+    let (status, body) = recall(&app, json!({ "projectId": p, "query": "one" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut got = labels(&body);
+    got.sort();
+    assert_eq!(got, ["a", "b"]);
+}
