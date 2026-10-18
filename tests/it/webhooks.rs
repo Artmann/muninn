@@ -291,3 +291,46 @@ async fn rate_limited_per_webhook() {
     let (status, _) = send(&app, &other, json!({ "a": "x" })).await;
     assert_eq!(status, StatusCode::ACCEPTED, "limits are per webhook");
 }
+
+/// Collects everything logged, to check what reaches the logs.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn request_logs_leave_out_the_webhook_token() {
+    let (app, _) = common::app().await;
+    let p = common::project();
+    let (_, path) = create(&app, p, json!({ "name": "n", "contentPath": "$" })).await;
+    let token = path.rsplit('/').next().unwrap().to_string();
+
+    let logs = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer({
+            let logs = logs.clone();
+            move || logs.clone()
+        })
+        .finish();
+    let _default = tracing::subscriber::set_default(subscriber);
+    let (status, body) = send(&app, &path, json!({ "text": "hello" })).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(
+        logs.contains("/api/v1/webhooks/"),
+        "requests are logged: {logs}"
+    );
+    assert!(!logs.contains(&token), "{logs}");
+}

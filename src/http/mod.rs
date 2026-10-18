@@ -5,7 +5,8 @@
 mod error;
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, FromRequest, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, MatchedPath, State};
+use axum::http::Request;
 use axum::routing::get;
 use tower_http::trace::TraceLayer;
 
@@ -26,6 +27,16 @@ async fn healthz(State(services): State<Services>) -> axum::Json<serde_json::Val
     axum::Json(serde_json::json!({ "status": status }))
 }
 
+/// The span each request is logged in. It names the route, not the URI,
+/// because a webhook's URI holds its token.
+fn request_span<B>(req: &Request<B>) -> tracing::Span {
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or("unmatched", MatchedPath::as_str);
+    tracing::debug_span!("request", method = %req.method(), route)
+}
+
 pub fn router(services: Services) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
@@ -33,6 +44,6 @@ pub fn router(services: Services) -> Router {
         .merge(recall::http::routes())
         .merge(webhooks::http::routes())
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(request_span))
         .with_state(services)
 }
