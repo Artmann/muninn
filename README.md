@@ -52,7 +52,7 @@ Against real S3, pass your AWS credentials and region instead and leave
 | `MUNINN_EMBED_MODEL` | `multilingual-e5-small`| embedding model, see below                         |
 | `MUNINN_MODEL_CACHE` | `./.fastembed_cache`   | where model files are downloaded (`/models` in Docker) |
 | `MUNINN_DOWNLOAD_ONLY` |                      | `1`: download the model and exit without serving   |
-| `MUNINN_VECTOR_STORE_TYPE` | `memory`        | where the search index lives: `memory` or `s3` (Amazon S3 Vectors) |
+| `VECTOR_STORE_TYPE` | `memory`        | where the search index lives: `memory` or `s3` (Amazon S3 Vectors) |
 | `MUNINN_VECTOR_BUCKET` |                      | S3 Vectors bucket; required when the type is `s3`  |
 | `AWS_ENDPOINT_URL`   |                        | set to `http://localhost:4566` for LocalStack      |
 | `AWS_*`              |                        | standard credentials and region                    |
@@ -60,7 +60,7 @@ Against real S3, pass your AWS credentials and region instead and leave
 ### Amazon S3 Vectors
 
 By default the search index lives in memory and is rebuilt from S3 on
-every start. Set `MUNINN_VECTOR_STORE_TYPE=s3` and `MUNINN_VECTOR_BUCKET`
+every start. Set `VECTOR_STORE_TYPE=s3` and `MUNINN_VECTOR_BUCKET`
 to keep it in Amazon S3 Vectors instead. The vector bucket and an index named after the model (for
 example `muninn-multilingual-e5-small`) are created on startup if missing.
 Use one vector bucket per environment, like the S3 bucket.

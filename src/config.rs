@@ -16,7 +16,7 @@ pub struct Config {
     pub vector_store: VectorStore,
 }
 
-/// Where the vector index lives, from `MUNINN_VECTOR_STORE_TYPE`.
+/// Where the vector index lives, from `VECTOR_STORE_TYPE`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VectorStore {
     /// In process, rebuilt from S3 on every start. The default.
@@ -31,14 +31,14 @@ impl VectorStore {
             None | Some("") | Some("memory") => Ok(VectorStore::Memory),
             Some("s3") => {
                 let bucket = bucket.map(str::trim).filter(|b| !b.is_empty()).context(
-                    "MUNINN_VECTOR_STORE_TYPE=s3 needs MUNINN_VECTOR_BUCKET to name the vector bucket",
+                    "VECTOR_STORE_TYPE=s3 needs MUNINN_VECTOR_BUCKET to name the vector bucket",
                 )?;
                 Ok(VectorStore::S3 {
                     bucket: bucket.to_string(),
                 })
             }
             Some(other) => {
-                anyhow::bail!("MUNINN_VECTOR_STORE_TYPE must be memory or s3, got {other:?}")
+                anyhow::bail!("VECTOR_STORE_TYPE must be memory or s3, got {other:?}")
             }
         }
     }
@@ -65,7 +65,7 @@ impl Config {
             model_cache: PathBuf::from(get("MUNINN_MODEL_CACHE").unwrap_or("./.fastembed_cache")),
             endpoint_url: get("AWS_ENDPOINT_URL").map(str::to_string),
             vector_store: VectorStore::from_env(
-                get("MUNINN_VECTOR_STORE_TYPE"),
+                get("VECTOR_STORE_TYPE"),
                 get("MUNINN_VECTOR_BUCKET"),
             )?,
         })
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn vector_store_s3_uses_bucket() {
         let c = vector_env(&[
-            ("MUNINN_VECTOR_STORE_TYPE", "S3"),
+            ("VECTOR_STORE_TYPE", "S3"),
             ("MUNINN_VECTOR_BUCKET", "vecs"),
         ])
         .unwrap();
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn vector_store_s3_without_bucket_is_error() {
         for bucket in [None, Some(" ")] {
-            let mut pairs = vec![("MUNINN_VECTOR_STORE_TYPE", "s3")];
+            let mut pairs = vec![("VECTOR_STORE_TYPE", "s3")];
             pairs.extend(bucket.map(|b| ("MUNINN_VECTOR_BUCKET", b)));
             let err = format!("{:#}", vector_env(&pairs).unwrap_err());
             assert!(err.contains("MUNINN_VECTOR_BUCKET"), "{err}");
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn vector_store_memory_ignores_bucket() {
         let c = vector_env(&[
-            ("MUNINN_VECTOR_STORE_TYPE", "memory"),
+            ("VECTOR_STORE_TYPE", "memory"),
             ("MUNINN_VECTOR_BUCKET", "vecs"),
         ])
         .unwrap();
@@ -138,9 +138,9 @@ mod tests {
     fn unknown_vector_store_is_error() {
         let err = format!(
             "{:#}",
-            vector_env(&[("MUNINN_VECTOR_STORE_TYPE", "pinecone")]).unwrap_err()
+            vector_env(&[("VECTOR_STORE_TYPE", "pinecone")]).unwrap_err()
         );
-        assert!(err.contains("MUNINN_VECTOR_STORE_TYPE"), "{err}");
+        assert!(err.contains("VECTOR_STORE_TYPE"), "{err}");
     }
 
     #[test]
