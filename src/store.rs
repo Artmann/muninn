@@ -231,14 +231,20 @@ impl S3Store {
         .await
     }
 
+    /// A datapoint's metadata. A corrupt `meta.json` reads as missing, so
+    /// it is skipped by reads and overwritten by the next write, rather than
+    /// failing every request that touches it.
     pub async fn get_meta(&self, project: Uuid, id: Uuid) -> anyhow::Result<Option<Meta>> {
         let key = keys::meta(project, id);
-        match self.get(&key).await? {
-            Some(bytes) => Ok(Some(
-                serde_json::from_slice(&bytes).with_context(|| format!("parsing {key}"))?,
-            )),
-            None => Ok(None),
-        }
+        Ok(self
+            .get(&key)
+            .await?
+            .and_then(|bytes| parse_meta(&key, &bytes)))
+    }
+
+    /// Whether a `meta.json` is stored for the datapoint, parseable or not.
+    pub async fn has_meta(&self, project: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        Ok(self.get(&keys::meta(project, id)).await?.is_some())
     }
 
     /// Delete a datapoint's `meta.json`, which makes it gone, then its
@@ -435,14 +441,18 @@ impl S3Store {
         // would crash-loop until someone fixed the bucket by hand.
         Ok(raw
             .into_iter()
-            .filter_map(|(key, bytes)| match serde_json::from_slice(&bytes?) {
-                Ok(meta) => Some(meta),
-                Err(e) => {
-                    tracing::warn!(key, error = %e, "unparseable meta.json; skipping");
-                    None
-                }
-            })
+            .filter_map(|(key, bytes)| parse_meta(&key, &bytes?))
             .collect())
+    }
+}
+
+fn parse_meta(key: &str, bytes: &[u8]) -> Option<Meta> {
+    match serde_json::from_slice(bytes) {
+        Ok(meta) => Some(meta),
+        Err(e) => {
+            tracing::warn!(key, error = %e, "unparseable meta.json; skipping");
+            None
+        }
     }
 }
 

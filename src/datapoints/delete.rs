@@ -67,7 +67,7 @@ impl DatapointService {
     /// pointing at nothing.
     async fn delete_one(&self, project: Uuid, id: Uuid) -> anyhow::Result<bool> {
         let _guard = self.locks.lock(datapoint_lock(project, id)).await;
-        if self.infra.store.get_meta(project, id).await?.is_none() {
+        if !self.infra.store.has_meta(project, id).await? {
             return Ok(false);
         }
         self.infra.index.remove(project, id).await?;

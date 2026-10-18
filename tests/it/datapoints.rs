@@ -1,6 +1,7 @@
 use crate::common;
 use axum::http::StatusCode;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 async fn ingest(app: &axum::Router, body: Value) -> Value {
     let (status, resp) = common::post(app, "/api/v1/ingest", body).await;
@@ -174,4 +175,68 @@ async fn list_validation() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["code"], "recall-range-invalid");
+}
+
+#[tokio::test]
+#[ignore]
+async fn corrupt_meta_is_skipped_by_reads_and_cleared_by_writes() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let corrupt = |id: Uuid| {
+        let bucket = state.store.bucket().to_string();
+        async move {
+            common::put_raw(&bucket, &muninn::store::keys::meta(p, id), b"{not json").await;
+        }
+    };
+    common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "good", "content": "fine" }),
+    )
+    .await;
+    let (_, by_id) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "x", "content": "x" }),
+    )
+    .await;
+    let by_id: Uuid = by_id["id"].as_str().unwrap().parse().unwrap();
+    corrupt(by_id).await;
+    let sourced = muninn::datapoints::source_uuid(p, "crm-1");
+    corrupt(sourced).await;
+
+    let (status, body) = common::get(&app, &format!("/api/v1/datapoints?projectId={p}")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["datapoints"].as_array().unwrap().len(), 1);
+
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/recall",
+        json!({ "projectId": p, "query": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"].as_array().unwrap().len(), 1);
+
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "sourceId": "crm-1", "label": "L", "content": "c" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a corrupt datapoint is overwritten: {body}"
+    );
+
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/delete",
+        json!({ "projectId": p, "ids": [by_id] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["deleted"], true);
+    assert_eq!(common::index_len(&state, p).await, 2);
 }
