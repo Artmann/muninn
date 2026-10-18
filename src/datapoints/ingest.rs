@@ -171,10 +171,14 @@ impl DatapointService {
         let fingerprint = new.fingerprint();
         let mut id = new.id();
 
-        let _guard = match key {
+        let _key_guard = match key {
             Some(key) => Some(self.locks.lock(format!("{project}:key:{key}")).await),
             None => None,
         };
+        // A new id is not known to anyone yet, but one an earlier attempt
+        // reserved may already be stored, and a delete must not run between
+        // reading and rewriting it.
+        let mut _datapoint_guard = None;
         if let Some(key) = key
             && let MarkerOutcome::Exists {
                 id: existing_id,
@@ -188,6 +192,7 @@ impl DatapointService {
             if recorded.is_some_and(|f| f != fingerprint) {
                 return Err(ServiceError::IdempotencyKeyReused);
             }
+            _datapoint_guard = Some(self.locks.lock(datapoint_lock(project, existing_id)).await);
             if let Some(meta) = infra.store.get_meta(project, existing_id).await? {
                 let content = infra
                     .store

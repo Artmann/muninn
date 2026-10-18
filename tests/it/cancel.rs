@@ -2,57 +2,11 @@
 //! must still finish, or storage and the index disagree until the next
 //! start.
 
-use crate::common;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use crate::common::{self, DELAY};
 
-use async_trait::async_trait;
-use muninn::app::{Infra, Services};
 use muninn::datapoints::{DeleteCommand, NewDatapoint};
-use muninn::embed::FakeEmbedder;
-use muninn::index::{MemoryIndex, VectorIndex};
 use serde_json::json;
 use uuid::Uuid;
-
-const DELAY: Duration = Duration::from_millis(300);
-
-/// Pauses before each upsert and after each remove, so a caller that gives
-/// up early stops in the middle of a write.
-struct SlowIndex(MemoryIndex);
-
-#[async_trait]
-impl VectorIndex for SlowIndex {
-    async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> anyhow::Result<()> {
-        tokio::time::sleep(DELAY).await;
-        self.0.upsert(project, id, vector).await
-    }
-
-    async fn remove(&self, project: Uuid, id: Uuid) -> anyhow::Result<()> {
-        self.0.remove(project, id).await?;
-        tokio::time::sleep(DELAY).await;
-        Ok(())
-    }
-
-    async fn search(
-        &self,
-        project: Uuid,
-        query: &[f32],
-        k: usize,
-    ) -> anyhow::Result<Vec<(Uuid, f32)>> {
-        self.0.search(project, query, k).await
-    }
-}
-
-async fn services() -> (Services, Infra) {
-    let infra = Infra {
-        store: common::store().await,
-        index: Arc::new(SlowIndex(MemoryIndex::new())),
-        embedder: Arc::new(FakeEmbedder::new(64)),
-        ready: Arc::new(AtomicBool::new(true)),
-    };
-    (Services::new(infra.clone()), infra)
-}
 
 fn new_datapoint(p: Uuid) -> NewDatapoint {
     serde_json::from_value(json!({ "projectId": p, "label": "L", "content": "c" })).unwrap()
@@ -61,7 +15,7 @@ fn new_datapoint(p: Uuid) -> NewDatapoint {
 #[tokio::test]
 #[ignore]
 async fn abandoned_ingest_still_reaches_the_index() {
-    let (services, infra) = services().await;
+    let (services, infra) = common::slow_services().await;
     let p = common::project();
     let mut new = new_datapoint(p);
     new.source_id = Some("crm-1".into());
@@ -81,7 +35,7 @@ async fn abandoned_ingest_still_reaches_the_index() {
 #[tokio::test]
 #[ignore]
 async fn abandoned_delete_still_removes_from_storage() {
-    let (services, infra) = services().await;
+    let (services, infra) = common::slow_services().await;
     let p = common::project();
     let id = services
         .datapoints

@@ -3,6 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+
+use async_trait::async_trait;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -10,7 +13,7 @@ use http_body_util::BodyExt;
 use muninn::app::{Infra, Services};
 use muninn::config::Config;
 use muninn::embed::FakeEmbedder;
-use muninn::index::MemoryIndex;
+use muninn::index::{MemoryIndex, VectorIndex};
 use muninn::store::S3Store;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -125,4 +128,45 @@ pub async fn index_len(state: &Infra, project: Uuid) -> usize {
         .await
         .unwrap()
         .len()
+}
+
+/// How long [`SlowIndex`] pauses.
+pub const DELAY: Duration = Duration::from_millis(300);
+
+/// Pauses before each upsert and after each remove, so a caller that gives
+/// up early stops in the middle of a write.
+pub struct SlowIndex(MemoryIndex);
+
+#[async_trait]
+impl VectorIndex for SlowIndex {
+    async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> anyhow::Result<()> {
+        tokio::time::sleep(DELAY).await;
+        self.0.upsert(project, id, vector).await
+    }
+
+    async fn remove(&self, project: Uuid, id: Uuid) -> anyhow::Result<()> {
+        self.0.remove(project, id).await?;
+        tokio::time::sleep(DELAY).await;
+        Ok(())
+    }
+
+    async fn search(
+        &self,
+        project: Uuid,
+        query: &[f32],
+        k: usize,
+    ) -> anyhow::Result<Vec<(Uuid, f32)>> {
+        self.0.search(project, query, k).await
+    }
+}
+
+/// Services over a [`SlowIndex`].
+pub async fn slow_services() -> (Services, Infra) {
+    let infra = Infra {
+        store: store().await,
+        index: Arc::new(SlowIndex(MemoryIndex::new())),
+        embedder: Arc::new(FakeEmbedder::new(64)),
+        ready: Arc::new(AtomicBool::new(true)),
+    };
+    (Services::new(infra.clone()), infra)
 }

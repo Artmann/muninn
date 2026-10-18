@@ -113,3 +113,43 @@ async fn delete_validation() {
         assert_eq!(body["error"]["code"], "validation");
     }
 }
+
+#[tokio::test]
+#[ignore]
+async fn delete_waits_for_a_keyed_retry_of_the_same_datapoint() {
+    // A keyed retry re-upserts the stored vector. A delete in between must
+    // not run until it is done, or the vector outlives the datapoint.
+    let (services, infra) = common::slow_services().await;
+    let p = common::project();
+    let new =
+        move || serde_json::from_value(json!({ "projectId": p, "label": "L", "content": "c" }));
+    let id = services
+        .datapoints
+        .ingest(new().unwrap(), Some("k"))
+        .await
+        .unwrap()
+        .datapoint
+        .id;
+
+    let retry = tokio::spawn({
+        let services = services.clone();
+        async move { services.datapoints.ingest(new().unwrap(), Some("k")).await }
+    });
+    tokio::time::sleep(common::DELAY / 2).await;
+    let deleted = services
+        .datapoints
+        .delete(muninn::datapoints::DeleteCommand {
+            project_id: p,
+            source_ids: vec![],
+            ids: vec![id],
+        })
+        .await
+        .unwrap();
+    assert!(deleted[0].deleted);
+    assert!(
+        retry.await.unwrap().unwrap().outcome == muninn::datapoints::IngestOutcome::Deduplicated
+    );
+
+    assert!(infra.store.get_meta(p, id).await.unwrap().is_none());
+    assert_eq!(common::index_len(&infra, p).await, 0, "no orphan vector");
+}
