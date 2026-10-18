@@ -1,13 +1,22 @@
 # syntax=docker/dockerfile:1
-FROM rust:1-trixie AS build
+FROM rust:1-trixie AS chef
+RUN cargo install cargo-chef --locked --version ^0.1
 WORKDIR /src
+
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-# Cache mounts keep the registry and compiled dependencies between builds,
-# so a source change only recompiles muninn itself.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked \
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Dependencies are built in their own layer from the recipe, which only
+# changes with Cargo.toml and Cargo.lock. A source change reuses that layer,
+# locally and from the CI layer cache, and only recompiles muninn itself.
+FROM chef AS build
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release --locked \
     && cp target/release/muninn /usr/local/bin/muninn
 
 FROM debian:trixie-slim

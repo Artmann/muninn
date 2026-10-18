@@ -40,9 +40,14 @@ curl -s -X POST localhost:8080/api/v1/recall -H 'content-type: application/json'
 cargo test                                # unit tests, no S3 or model needed
 set -a; . ./.env.example; set +a
 cargo test -- --ignored                   # all integration and e2e tests against LocalStack
-cargo test --test ingest -- --ignored     # one suite: store, ingest, recall, boot, real_model, e2e
-cargo test --test e2e -- --ignored        # end to end: the real binary over HTTP
+cargo test --test it ingest:: -- --ignored  # one suite: store, ingest, recall, boot, real_model, e2e
+cargo test --test it e2e:: -- --ignored     # end to end: the real binary over HTTP
 ```
+
+The integration tests are one test binary, `tests/it/main.rs`, with a
+module per suite. Every file directly under `tests/` would be linked
+against all the dependencies separately, so add new suites as modules
+there instead.
 
 Unit tests cover the recall selection algorithm, embedding input
 construction, and the in-memory index, using a fake embedder. Integration
@@ -57,7 +62,7 @@ realistic English and Swedish queries find the right memory in their top
 three, and covers restart, time filters, budget, sort and batch retries.
 Server logs go to `target/e2e-logs/`. `e2e_model_switch` is kept separate
 because it downloads a second model (`bge-small-en-v1.5`, about 130 MB);
-run it with `cargo test --test e2e_model_switch -- --ignored`. A plain
+run it with `cargo test --test it e2e_model_switch:: -- --ignored`. A plain
 `cargo test -- --ignored` includes it.
 
 `s3vectors` runs against real Amazon S3 Vectors, since LocalStack does
@@ -65,7 +70,7 @@ not emulate it. It skips itself unless `TEST_VECTOR_BUCKET` is set.
 With real AWS credentials and region (and no `AWS_ENDPOINT_URL`):
 
 ```sh
-TEST_VECTOR_BUCKET=muninn-dev-vectors cargo test --test s3vectors -- --ignored
+TEST_VECTOR_BUCKET=muninn-dev-vectors cargo test --test it s3vectors:: -- --ignored
 ```
 
 It creates a throwaway index in that bucket and deletes it afterwards.
@@ -81,12 +86,12 @@ docker compose --profile app up --build   # image + LocalStack, on :8080
 
 The `muninn` service is behind the `app` profile so a plain
 `docker compose up -d` starts only LocalStack, leaving port 8080 free for
-`cargo run`. The build uses BuildKit cache mounts for the cargo registry
-and target directory, so rebuilds after a source change only recompile
-muninn. The runtime image runs as the unprivileged `muninn` user.
+`cargo run`. The build uses cargo-chef to compile the dependencies in
+their own layer, which is reused until `Cargo.toml` or `Cargo.lock`
+changes, so rebuilds after a source change only recompile muninn. The runtime image runs as the unprivileged `muninn` user.
 
 The build runs the binary once with `DOWNLOAD_ONLY=1` to bake the
-model into `/models`. Both stages use Debian trixie: the prebuilt ONNX
+model into `/models`. All stages use Debian trixie: the prebuilt ONNX
 Runtime that `ort` links needs glibc 2.38 or newer, which bookworm lacks.
 
 ## Code layout
