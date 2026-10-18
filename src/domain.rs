@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// A datapoint as sent by a caller. The server assigns the id.
@@ -43,6 +44,34 @@ impl NewDatapoint {
             return Err("content must not be empty".into());
         }
         Ok(())
+    }
+
+    /// Identifies the request behind an idempotency key, so a retry can be
+    /// told apart from a different request reusing the key. Encoding
+    /// differences don't count: omitted `metadata` equals `{}`, object keys
+    /// are compared sorted, and timestamps as instants. An omitted
+    /// `timestamp` stays distinct from an explicit one.
+    pub fn fingerprint(&self) -> String {
+        #[derive(Serialize)]
+        struct Canonical<'a> {
+            project_id: Uuid,
+            label: &'a str,
+            content: &'a str,
+            timestamp: Option<DateTime<Utc>>,
+            metadata: &'a Map<String, Value>,
+            audience: Option<&'a str>,
+        }
+        let empty = Map::new();
+        let canonical = Canonical {
+            project_id: self.project_id,
+            label: &self.label,
+            content: &self.content,
+            timestamp: self.timestamp,
+            metadata: self.metadata.as_ref().unwrap_or(&empty),
+            audience: self.audience.as_deref(),
+        };
+        let bytes = serde_json::to_vec(&canonical).expect("serialising plain data cannot fail");
+        hex::encode(Sha256::digest(bytes))
     }
 
     pub fn into_parts(self, id: Uuid, now: DateTime<Utc>) -> Datapoint {
@@ -181,6 +210,61 @@ mod tests {
             serde_json::to_value(&d).unwrap()["timestamp"],
             "2026-10-17T12:00:00Z"
         );
+    }
+
+    fn parse(json: &str) -> NewDatapoint {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn fingerprint_ignores_encoding_differences() {
+        let p = r#""projectId":"019a0000-0000-7000-8000-000000000000","label":"a","content":"b""#;
+        let fp = |rest: &str| parse(&format!("{{{p}{rest}}}")).fingerprint();
+        assert_eq!(fp(""), fp(r#","metadata":{}"#), "omitted metadata is {{}}");
+        assert_eq!(
+            fp(r#","metadata":{"x":1,"y":{"a":1,"b":2}}"#),
+            fp(r#","metadata":{"y":{"b":2,"a":1},"x":1}"#),
+            "key order"
+        );
+        assert_eq!(
+            fp(r#","timestamp":"2026-10-17T14:00:00+02:00""#),
+            fp(r#","timestamp":"2026-10-17T12:00:00Z""#),
+            "same instant"
+        );
+    }
+
+    #[test]
+    fn fingerprint_changes_with_any_field() {
+        let fp = base().fingerprint();
+        let changed = [
+            NewDatapoint {
+                project_id: Uuid::now_v7(),
+                ..base()
+            },
+            NewDatapoint {
+                label: "other".into(),
+                ..base()
+            },
+            NewDatapoint {
+                content: "other".into(),
+                ..base()
+            },
+            NewDatapoint {
+                timestamp: Some(Utc::now()),
+                ..base()
+            },
+            NewDatapoint {
+                metadata: serde_json::from_str(r#"{"k":"v"}"#).unwrap(),
+                ..base()
+            },
+            NewDatapoint {
+                audience: Some("eng".into()),
+                ..base()
+            },
+        ];
+        for n in changed {
+            assert_ne!(n.fingerprint(), fp, "{n:?}");
+        }
     }
 
     #[test]

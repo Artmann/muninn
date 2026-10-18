@@ -277,8 +277,18 @@ Response `201` with the stored datapoint (all fields, no embedding) plus
 idempotency key is scoped to the project; the same key in two projects is
 two datapoints.
 
-A request with an idempotency key whose marker exists is not re-validated
-against the new body. The first write wins and the body is ignored.
+The marker records a fingerprint of the request alongside the id: a
+SHA-256 over the datapoint fields with encoding differences removed
+(omitted `metadata` equals `{}`, object keys sorted, timestamps compared as
+instants; an omitted `timestamp` is distinct from an explicit one). A
+repeat with the same key and the same request returns the original. A
+different request reusing the key is rejected with
+`422 idempotency-key-reused` and nothing is written, whether or not the
+first attempt finished. This follows the IETF Idempotency-Key draft and
+Stripe: silently returning the first datapoint for a different body would
+hide client bugs such as colliding keys. The body is validated before the
+key is checked, so an invalid body is always `400`. Markers written before
+fingerprints existed carry only the id and are honoured without a check.
 
 An empty or whitespace-only `idempotencyKey` is rejected with
 `400 validation`; omit the field instead.
@@ -378,6 +388,7 @@ All errors are JSON: `{ "error": { "code": "...", "message": "..." } }`.
 | 400  | `budget-conflict`       | both `level` and `maxTokens`                       |
 | 400  | `batch-too-large`       | more than 100 items                                |
 | 413  | `payload-too-large`     | request body over 10 MiB                           |
+| 422  | `idempotency-key-reused`| key already used with a different request          |
 | 503  | `loading`               | index not yet rebuilt from S3                      |
 | 500  | `internal`              | S3 or model failure; message is generic, details logged |
 

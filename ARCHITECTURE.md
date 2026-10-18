@@ -38,8 +38,9 @@ idempotency key.
   vector with the model name and dimension, and the content token count.
   Storing the vector and token count means a restart never has to run the
   model or tokenizer over old data.
-- **idempotency marker**: a tiny JSON object `{"id": "..."}` mapping a
-  caller's key to the datapoint it produced. The key is SHA-256 hashed so
+- **idempotency marker**: a tiny JSON object `{"id": "...", "fingerprint": "..."}`
+  mapping a caller's key to the datapoint it produced and a hash of the
+  request that produced it. The key is SHA-256 hashed so
   any string works as an S3 object name. Markers are per project.
 
 `meta.json` is the source of truth. A datapoint exists when its
@@ -51,7 +52,10 @@ everything else.
 1. Validate the request. A `timestamp` more than 5 minutes ahead of the
    server clock is rejected: recall would not see it until then.
 2. If there is an idempotency key: mint an id and create the marker with a
-   create-only put. If the marker already existed, read its id. If that id
+   create-only put. If the marker already existed, read it. If its
+   fingerprint differs from this request's, return
+   `422 idempotency-key-reused`; reusing a key for a different request is
+   a client bug, not a retry. Otherwise, if that id
    already has a `meta.json`, re-insert its vector into the index (in case
    an earlier attempt stopped before that) and return it as deduplicated.
    If not, a previous attempt crashed; continue below reusing that id.
@@ -154,6 +158,7 @@ index.
 | 400  | `budget-conflict`      | both `level` and `maxTokens`                  |
 | 400  | `batch-too-large`      | more than 100 items                           |
 | 413  | `payload-too-large`    | request body over 10 MiB                      |
+| 422  | `idempotency-key-reused` | key already used with a different request   |
 | 503  | `loading`              | index not yet rebuilt from S3                 |
 | 500  | `internal`             | S3 or model failure; details in logs only     |
 

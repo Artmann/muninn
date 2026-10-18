@@ -44,12 +44,19 @@ pub mod keys {
 
 pub enum MarkerOutcome {
     Created,
-    Exists(Uuid),
+    /// Another request holds the key. `fingerprint` is `None` for markers
+    /// written before fingerprints were recorded.
+    Exists {
+        id: Uuid,
+        fingerprint: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
 struct MarkerBody {
     id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<String>,
 }
 
 #[derive(Clone)]
@@ -78,6 +85,10 @@ fn status_of<E>(err: &SdkError<E, HttpResponse>) -> Option<u16> {
 }
 
 impl S3Store {
+    pub fn bucket(&self) -> &str {
+        &self.bucket
+    }
+
     pub fn new(client: Client, bucket: String) -> S3Store {
         S3Store { client, bucket }
     }
@@ -202,15 +213,19 @@ impl S3Store {
     }
 
     /// Write the idempotency marker only if it does not exist yet. If another
-    /// request got there first, return the id it recorded.
+    /// request got there first, return the id and fingerprint it recorded.
     pub async fn create_marker(
         &self,
         project: Uuid,
         key: &str,
         id: Uuid,
+        fingerprint: &str,
     ) -> anyhow::Result<MarkerOutcome> {
         let object_key = keys::marker(project, key);
-        let body = serde_json::to_vec(&MarkerBody { id })?;
+        let body = serde_json::to_vec(&MarkerBody {
+            id,
+            fingerprint: Some(fingerprint.to_string()),
+        })?;
         let result = self
             .client
             .put_object()
@@ -228,7 +243,10 @@ impl S3Store {
                     if let Some(bytes) = self.get(&object_key).await? {
                         let marker: MarkerBody = serde_json::from_slice(&bytes)
                             .with_context(|| format!("parsing {object_key}"))?;
-                        return Ok(MarkerOutcome::Exists(marker.id));
+                        return Ok(MarkerOutcome::Exists {
+                            id: marker.id,
+                            fingerprint: marker.fingerprint,
+                        });
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }

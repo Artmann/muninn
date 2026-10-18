@@ -161,14 +161,13 @@ async fn memories_and_idempotency_survive_restart() {
     let first = Server::start().await;
     let bucket = first.bucket.clone();
     let project = Uuid::now_v7();
-    let original = first
-        .ingest(json!({
-            "idempotencyKey": "decision-1",
-            "projectId": project,
-            "label": "Storage decision",
-            "content": "We store all memories in S3."
-        }))
-        .await;
+    let request = json!({
+        "idempotencyKey": "decision-1",
+        "projectId": project,
+        "label": "Storage decision",
+        "content": "We store all memories in S3."
+    });
+    let original = first.ingest(request.clone()).await;
     first.stop();
 
     let second = Server::start_with(&bucket, None).await;
@@ -177,7 +176,12 @@ async fn memories_and_idempotency_survive_restart() {
         .await;
     assert_eq!(resp["results"][0]["id"], original["id"]);
 
-    let (status, again) = second
+    let (status, again) = second.post("/api/v1/ingest", &request).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(again["deduplicated"], true);
+    assert_eq!(again["id"], original["id"]);
+
+    let (status, reused) = second
         .post(
             "/api/v1/ingest",
             &json!({
@@ -188,10 +192,8 @@ async fn memories_and_idempotency_survive_restart() {
             }),
         )
         .await;
-    assert_eq!(status, 200, "{again}");
-    assert_eq!(again["deduplicated"], true);
-    assert_eq!(again["id"], original["id"]);
-    assert_eq!(again["content"], "We store all memories in S3.");
+    assert_eq!(status, 422, "{reused}");
+    assert_eq!(reused["error"]["code"], "idempotency-key-reused");
 }
 
 #[tokio::test]

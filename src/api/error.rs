@@ -24,6 +24,8 @@ pub enum ApiError {
     BudgetConflict,
     #[error("a batch holds at most 100 items")]
     BatchTooLarge,
+    #[error("idempotencyKey was already used with a different request; use a new key")]
+    IdempotencyKeyReused,
     #[error("request body is larger than 10 MiB")]
     PayloadTooLarge,
     #[error("index is still loading from storage")]
@@ -39,6 +41,7 @@ impl ApiError {
             ApiError::RecallRangeInvalid => "recall-range-invalid",
             ApiError::BudgetConflict => "budget-conflict",
             ApiError::BatchTooLarge => "batch-too-large",
+            ApiError::IdempotencyKeyReused => "idempotency-key-reused",
             ApiError::PayloadTooLarge => "payload-too-large",
             ApiError::Loading => "loading",
             ApiError::Internal(_) => "internal",
@@ -52,6 +55,7 @@ impl ApiError {
             | ApiError::RecallRangeInvalid
             | ApiError::BudgetConflict
             | ApiError::BatchTooLarge => StatusCode::BAD_REQUEST,
+            ApiError::IdempotencyKeyReused => StatusCode::UNPROCESSABLE_ENTITY,
             ApiError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ApiError::Loading => StatusCode::SERVICE_UNAVAILABLE,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -135,6 +139,14 @@ mod tests {
     async fn codes_and_statuses() {
         assert_eq!(ApiError::Loading.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(ApiError::Loading.code(), "loading");
+        assert_eq!(
+            ApiError::IdempotencyKeyReused.code(),
+            "idempotency-key-reused"
+        );
+        assert_eq!(
+            ApiError::IdempotencyKeyReused.status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
         assert_eq!(ApiError::BudgetConflict.code(), "budget-conflict");
         assert_eq!(ApiError::BatchTooLarge.code(), "batch-too-large");
         assert_eq!(ApiError::Validation("x".into()).code(), "validation");

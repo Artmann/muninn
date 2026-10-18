@@ -3,6 +3,7 @@ mod common;
 use std::sync::atomic::Ordering;
 
 use axum::http::StatusCode;
+use muninn::domain::NewDatapoint;
 use muninn::store::MarkerOutcome;
 use serde_json::json;
 use uuid::Uuid;
@@ -34,7 +35,26 @@ async fn ingest_returns_201_with_server_id_and_defaults() {
 
 #[tokio::test]
 #[ignore]
-async fn ingest_with_key_dedupes_and_keeps_first_body() {
+async fn ingest_with_key_dedupes_identical_retry() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let body = json!({ "projectId": p, "label": "first", "content": "c", "idempotencyKey": "K" });
+    let (s1, b1) = common::post(&app, "/api/v1/ingest", body.clone()).await;
+    assert_eq!(s1, StatusCode::CREATED);
+    let (s2, b2) = common::post(&app, "/api/v1/ingest", body).await;
+    assert_eq!(s2, StatusCode::OK, "{b2}");
+    assert_eq!(b2["deduplicated"], true);
+    assert_eq!(b2["id"], b1["id"]);
+    assert_eq!(
+        b2["timestamp"], b1["timestamp"],
+        "defaulted timestamp is kept"
+    );
+    assert_eq!(common::index_len(&state, p).await, 1);
+}
+
+#[tokio::test]
+#[ignore]
+async fn reusing_key_with_different_body_is_422() {
     let (app, state) = common::app().await;
     let p = common::project();
     let (s1, b1) = common::post(
@@ -50,11 +70,58 @@ async fn ingest_with_key_dedupes_and_keeps_first_body() {
         json!({ "projectId": p, "label": "second", "content": "c", "idempotencyKey": "K" }),
     )
     .await;
-    assert_eq!(s2, StatusCode::OK, "{b2}");
-    assert_eq!(b2["deduplicated"], true);
-    assert_eq!(b2["label"], "first");
-    assert_eq!(b2["id"], b1["id"]);
+    assert_eq!(s2, StatusCode::UNPROCESSABLE_ENTITY, "{b2}");
+    assert_eq!(b2["error"]["code"], "idempotency-key-reused");
+    let id: Uuid = b1["id"].as_str().unwrap().parse().unwrap();
+    let meta = state.store.get_meta(p, id).await.unwrap().unwrap();
+    assert_eq!(meta.label, "first");
     assert_eq!(common::index_len(&state, p).await, 1);
+}
+
+#[tokio::test]
+#[ignore]
+async fn half_written_datapoint_rejects_different_body() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let original: NewDatapoint =
+        serde_json::from_value(json!({ "projectId": p, "label": "a", "content": "c" })).unwrap();
+    let x = Uuid::now_v7();
+    state
+        .store
+        .create_marker(p, "K", x, &original.fingerprint())
+        .await
+        .unwrap();
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "a", "content": "changed", "idempotencyKey": "K" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(state.store.get_meta(p, x).await.unwrap().is_none());
+}
+
+#[tokio::test]
+#[ignore]
+async fn marker_without_fingerprint_is_honoured() {
+    // Markers written before fingerprints existed hold only the id.
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let x = Uuid::now_v7();
+    common::put_raw(
+        state.store.bucket(),
+        &muninn::store::keys::marker(p, "K"),
+        json!({ "id": x }).to_string().as_bytes(),
+    )
+    .await;
+    let (status, body) = common::post(
+        &app,
+        "/api/v1/ingest",
+        json!({ "projectId": p, "label": "a", "content": "c", "idempotencyKey": "K" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["id"], json!(x));
 }
 
 #[tokio::test]
@@ -84,16 +151,17 @@ async fn ingest_completes_half_written_datapoint() {
     let (app, state) = common::app().await;
     let p = common::project();
     let x = Uuid::now_v7();
+    let req = json!({ "projectId": p, "label": "a", "content": "c", "idempotencyKey": "K" });
+    let new: NewDatapoint = serde_json::from_value(req.clone()).unwrap();
     assert!(matches!(
-        state.store.create_marker(p, "K", x).await.unwrap(),
+        state
+            .store
+            .create_marker(p, "K", x, &new.fingerprint())
+            .await
+            .unwrap(),
         MarkerOutcome::Created
     ));
-    let (status, body) = common::post(
-        &app,
-        "/api/v1/ingest",
-        json!({ "projectId": p, "label": "a", "content": "c", "idempotencyKey": "K" }),
-    )
-    .await;
+    let (status, body) = common::post(&app, "/api/v1/ingest", req).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["id"], json!(x));
     assert_eq!(body["deduplicated"], false);
@@ -200,6 +268,38 @@ async fn batch_retry_with_key_dedupes_per_item() {
         assert_eq!(r["deduplicated"], true);
         assert_eq!(r["datapoint"]["id"], first["results"][i]["datapoint"]["id"]);
     }
+    assert_eq!(common::index_len(&state, p).await, 3);
+}
+
+#[tokio::test]
+#[ignore]
+async fn batch_retry_with_changed_item_is_422_for_that_item() {
+    let (app, state) = common::app().await;
+    let p = common::project();
+    let mut list = items(p, 3);
+    let (_, first) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "idempotencyKey": "B", "items": list.clone() }),
+    )
+    .await;
+    list[1]["content"] = json!("changed");
+    let (status, second) = common::post(
+        &app,
+        "/api/v1/ingest/batch",
+        json!({ "idempotencyKey": "B", "items": list }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let r = &second["results"];
+    assert_eq!(r[0]["status"], 200, "{second}");
+    assert_eq!(
+        r[0]["datapoint"]["id"],
+        first["results"][0]["datapoint"]["id"]
+    );
+    assert_eq!(r[1]["status"], 422, "{second}");
+    assert_eq!(r[1]["error"]["code"], "idempotency-key-reused");
+    assert_eq!(r[2]["error"]["code"], "skipped");
     assert_eq!(common::index_len(&state, p).await, 3);
 }
 

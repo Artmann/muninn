@@ -92,10 +92,13 @@ of ingest. A `timestamp` more than 5 minutes ahead of the server clock is
 rejected with `400 validation`, since recall only sees a datapoint once
 its timestamp has passed. `metadata` defaults to `{}`.
 
-Returns `201` with the stored datapoint, or `200` with
-`"deduplicated": true` if the idempotency key was seen before in this
-project. The server assigns the `id`. An empty `idempotencyKey` is
-rejected; omit the field instead.
+Returns `201` with the stored datapoint. The server assigns the `id`.
+
+`idempotencyKey` makes retries safe. Sending the same request again with
+the same key returns `200` with the original datapoint and
+`"deduplicated": true`. Reusing a key for a different request returns
+`422 idempotency-key-reused` and stores nothing. Keys are scoped to the
+project. An empty `idempotencyKey` is rejected; omit the field instead.
 
 ### `POST /api/v1/ingest/batch`
 
@@ -106,9 +109,10 @@ rejected; omit the field instead.
 Up to 100 items. All items are validated before anything is written; one
 invalid item rejects the whole batch with `400 validation` and a `details`
 array naming the failing indexes. Returns `200` with a per-item result
-list. With a batch key, a retry after
-a partial failure finishes the unfinished items and does not duplicate the
-finished ones.
+list. With a batch key, a retry of the same
+batch after a partial failure finishes the unfinished items and does not
+duplicate the finished ones. An item that changed since the first attempt
+gets `422 idempotency-key-reused` in its result.
 
 ### `POST /api/v1/recall`
 

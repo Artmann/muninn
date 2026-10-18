@@ -47,9 +47,10 @@ fn validate_key(key: Option<&str>) -> Result<(), ApiError> {
     }
 }
 
-/// Store one datapoint. With an idempotency key, a repeat returns the
-/// original datapoint, and a half-finished earlier attempt is completed
-/// under the id it already reserved.
+/// Store one datapoint. With an idempotency key, a repeat of the same
+/// request returns the original datapoint, a half-finished earlier attempt
+/// is completed under the id it already reserved, and a different request
+/// reusing the key is rejected.
 pub async fn ingest_one(
     state: &AppState,
     new: NewDatapoint,
@@ -58,6 +59,7 @@ pub async fn ingest_one(
     validate_key(key)?;
     new.validate().map_err(ApiError::Validation)?;
     let project = new.project_id;
+    let fingerprint = new.fingerprint();
     let mut id = Uuid::now_v7();
 
     let _guard = match key {
@@ -65,9 +67,18 @@ pub async fn ingest_one(
         None => None,
     };
     if let Some(key) = key
-        && let MarkerOutcome::Exists(existing_id) =
-            state.store.create_marker(project, key, id).await?
+        && let MarkerOutcome::Exists {
+            id: existing_id,
+            fingerprint: recorded,
+        } = state
+            .store
+            .create_marker(project, key, id, &fingerprint)
+            .await?
     {
+        // Markers from before fingerprints existed are trusted as before.
+        if recorded.is_some_and(|f| f != fingerprint) {
+            return Err(ApiError::IdempotencyKeyReused);
+        }
         if let Some(meta) = state.store.get_meta(project, existing_id).await? {
             let content = state
                 .store

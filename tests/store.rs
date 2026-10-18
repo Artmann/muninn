@@ -47,11 +47,14 @@ async fn marker_is_create_only() {
     let p = common::project();
     let (first, second) = (Uuid::now_v7(), Uuid::now_v7());
     assert!(matches!(
-        s.create_marker(p, "k", first).await.unwrap(),
+        s.create_marker(p, "k", first, "fp1").await.unwrap(),
         MarkerOutcome::Created
     ));
-    match s.create_marker(p, "k", second).await.unwrap() {
-        MarkerOutcome::Exists(id) => assert_eq!(id, first),
+    match s.create_marker(p, "k", second, "fp2").await.unwrap() {
+        MarkerOutcome::Exists { id, fingerprint } => {
+            assert_eq!(id, first);
+            assert_eq!(fingerprint.as_deref(), Some("fp1"));
+        }
         MarkerOutcome::Created => panic!("second create must not succeed"),
     }
 }
