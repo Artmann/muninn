@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::domain::Meta;
-use crate::webhook::Webhook;
+use crate::datapoints::Meta;
+use crate::webhooks::Webhook;
 
 /// Object key layout. See ARCHITECTURE.md.
 pub mod keys {

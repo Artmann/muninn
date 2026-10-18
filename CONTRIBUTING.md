@@ -96,24 +96,49 @@ Runtime that `ort` links needs glibc 2.38 or newer, which bookworm lacks.
 
 ## Code layout
 
+The code is organised by domain. Each domain folder holds its model, its
+use cases (a service) and its HTTP handlers:
+
 ```
+src/datapoints/      ingest, delete and list datapoints
+  model.rs           NewDatapoint, Datapoint, Meta, validation
+  ingest.rs          single and batch ingest, idempotency, upsert by sourceId
+  delete.rs          delete by sourceId or id
+  list.rs            listing with filters and pagination
+  http.rs            routes, request/response types
+src/recall/          recall a project's datapoints for a query
+  select.rs          the selection algorithm, pure over loaded metas
+  mod.rs             the recall service
+  http.rs            routes, request/response types
+src/webhooks/        inbound webhooks
+  model.rs           Webhook, Settings, filters, event mapping
+  service.rs         manage webhooks, receive events
+  rate.rs            per-webhook rate limit
+  http.rs            routes, request/response types
+src/app.rs           Infra (store, index, embedder) and Services wiring
+src/error.rs         ServiceError, what a use case can fail with
+src/http/            router, JSON extractor, HTTP error envelope
+src/locks.rs         in-process per-key locks
 src/main.rs          wiring, download-only mode, server
 src/config.rs        environment variables
 src/boot.rs          index rebuild from S3 at startup
-src/api/             handlers, request/response types, error mapping, key locks
-src/domain.rs        Datapoint, validation
 src/embed.rs         Embedder trait + fastembed impl
-src/store.rs         S3 document store (content, meta, idempotency)
+src/store.rs         S3 document store (content, meta, idempotency, webhooks)
 src/index/mod.rs     VectorIndex trait
 src/index/memory.rs  in-memory impl
 src/index/s3vectors.rs  Amazon S3 Vectors impl
-src/recall.rs        the recall algorithm, pure over loaded metas
 src/tokens.rs        token counting
 ```
 
-Keep the recall algorithm in `recall.rs` pure: it takes already-loaded
-metadata and scores and returns the selection. That is what makes it
-unit-testable without S3.
+Handlers in `http.rs` only parse the request, call the domain's service
+and shape the response. Services know nothing about HTTP: they take plain
+commands and return results or a `ServiceError`, which `src/http/error.rs`
+maps to a status and error code. Business rules belong in the model or
+the service, never in a handler.
+
+Keep the recall algorithm in `recall/select.rs` pure: it takes
+already-loaded metadata and scores and returns the selection. That is
+what makes it unit-testable without S3.
 
 ## Design docs
 

@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
-use muninn::api::AppState;
-use muninn::api::locks::KeyLocks;
+use muninn::app::{Infra, Services};
 use muninn::boot;
 use muninn::config::{Config, VectorStore};
 use muninn::embed::Embedder;
@@ -56,24 +55,22 @@ async fn main() -> anyhow::Result<()> {
         VectorStore::Memory => Arc::new(MemoryIndex::new()),
     };
 
-    let state = AppState {
+    let infra = Infra {
         store,
         index,
         embedder: Arc::new(embedder),
         ready: Arc::new(AtomicBool::new(false)),
-        locks: KeyLocks::default(),
-        webhook_rate: Default::default(),
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     tracing::info!(bind = %config.bind, "listening; rebuilding index");
     boot::spawn_rebuild(
-        state.store.clone(),
-        state.index.clone(),
-        state.embedder.clone(),
-        state.ready.clone(),
+        infra.store.clone(),
+        infra.index.clone(),
+        infra.embedder.clone(),
+        infra.ready.clone(),
     );
-    axum::serve(listener, muninn::api::router(state))
+    axum::serve(listener, muninn::http::router(Services::new(infra)))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     tracing::info!("shut down");

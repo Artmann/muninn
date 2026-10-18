@@ -1,13 +1,10 @@
-//! Inbound webhooks: a third party POSTs to a secret URL and the
-//! webhook's settings turn the body into a datapoint.
-
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::domain::{NewDatapoint, validate_audience};
+use crate::datapoints::{NewDatapoint, validate_audience};
 
 /// Most webhooks one project holds.
 pub const MAX_PER_PROJECT: usize = 20;

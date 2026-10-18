@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use axum::http::StatusCode;
 use chrono::Utc;
 use muninn::boot::rebuild_index;
-use muninn::domain::{Meta, StoredEmbedding};
+use muninn::datapoints::{Meta, StoredEmbedding};
 use std::sync::Arc;
 
 use muninn::embed::{Embedder, FakeEmbedder};

@@ -94,7 +94,7 @@ async fn create_validation_and_limit() {
     let (status, _) = common::get(&app, "/api/v1/webhooks").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "projectId is required");
 
-    for i in 0..muninn::webhook::MAX_PER_PROJECT {
+    for i in 0..muninn::webhooks::MAX_PER_PROJECT {
         create(
             &app,
             p,
@@ -155,7 +155,7 @@ async fn events_become_datapoints() {
         .parse::<Uuid>()
         .unwrap();
     let source_id = format!("{id}:SUP-1042");
-    assert_eq!(datapoint, muninn::domain::source_uuid(p, &source_id));
+    assert_eq!(datapoint, muninn::datapoints::source_uuid(p, &source_id));
 
     let meta = state.store.get_meta(p, datapoint).await.unwrap().unwrap();
     assert_eq!(meta.label, "Login broken");
@@ -258,7 +258,7 @@ async fn refusals() {
         assert_eq!(body["error"]["code"], "not-found");
     }
 
-    let big = vec![b'a'; muninn::webhook::MAX_BODY_BYTES + 1];
+    let big = vec![b'a'; muninn::webhooks::MAX_BODY_BYTES + 1];
     let (status, body) = common::post_raw(&app, &path, "text/plain", big).await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
     assert_eq!(body["error"]["code"], "webhook-body-too-large");
@@ -279,7 +279,7 @@ async fn rate_limited_per_webhook() {
     )
     .await;
     // Dropped events are cheap and still count.
-    for _ in 0..muninn::api::webhooks::EVENTS_PER_MINUTE {
+    for _ in 0..muninn::webhooks::EVENTS_PER_MINUTE {
         let (status, _) = send(&app, &path, json!({ "a": "x" })).await;
         assert_eq!(status, StatusCode::OK);
     }
