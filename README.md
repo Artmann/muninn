@@ -7,7 +7,8 @@ can paste straight into a prompt.
 
 - Semantic recall with a local, multilingual embedding model. No external
   AI API.
-- S3 as the only storage backend.
+- S3 as the only storage backend, with an optional Amazon S3 Vectors
+  index for larger data.
 - Idempotent writes.
 - Everything scoped to a `projectId`.
 
@@ -51,8 +52,25 @@ Against real S3, pass your AWS credentials and region instead and leave
 | `MUNINN_EMBED_MODEL` | `multilingual-e5-small`| embedding model, see below                         |
 | `MUNINN_MODEL_CACHE` | `./.fastembed_cache`   | where model files are downloaded (`/models` in Docker) |
 | `MUNINN_DOWNLOAD_ONLY` |                      | `1`: download the model and exit without serving   |
+| `MUNINN_VECTOR_BUCKET` |                      | Amazon S3 Vectors bucket; unset keeps the in-memory index |
 | `AWS_ENDPOINT_URL`   |                        | set to `http://localhost:4566` for LocalStack      |
 | `AWS_*`              |                        | standard credentials and region                    |
+
+### Amazon S3 Vectors
+
+By default the search index lives in memory and is rebuilt from S3 on
+every start. Set `MUNINN_VECTOR_BUCKET` to keep it in Amazon S3 Vectors
+instead. The vector bucket and an index named after the model (for
+example `muninn-multilingual-e5-small`) are created on startup if missing.
+Use one vector bucket per environment, like the S3 bucket.
+
+LocalStack does not emulate S3 Vectors, so this needs real AWS: unset
+`AWS_ENDPOINT_URL` and use real credentials and region. The credentials
+need `s3vectors:GetIndex`, `CreateIndex`, `CreateVectorBucket`,
+`PutVectors`, `QueryVectors` and `GetVectors` on the vector bucket. You
+can create the bucket yourself instead
+(`aws s3vectors create-vector-bucket --vector-bucket-name muninn-dev-vectors`)
+and drop `CreateVectorBucket`.
 
 ### Embedding models
 
@@ -154,7 +172,6 @@ recall return `503` with code `loading` until then.
 - Filtering on `audience`
 - Update and delete
 - Metadata filters on recall
-- Amazon S3 Vectors backend
 
 ## License
 

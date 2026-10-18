@@ -13,7 +13,8 @@ reading the code. The full design with rationale is in
                          │  embedder (fastembed, CPU)  │──▶ vector
                          │  token counter (cl100k)     │──▶ contentTokens
                          │                             │
-                         │  VectorIndex (in-memory)    │◀── rebuilt from S3 on start
+                         │  VectorIndex (in-memory or  │◀── rebuilt from S3 on start
+                         │   Amazon S3 Vectors)        │
                          │                             │
                          └──────────┬──────────────────┘
                                     │
@@ -24,8 +25,10 @@ reading the code. The full design with rationale is in
                           projects/{projectId}/idempotency/{sha256(key)}
 ```
 
-There is no database. S3 holds everything. The in-memory index is a cache
-of the vectors in S3 and is rebuilt on every start.
+There is no database. S3 holds everything. The search index is a copy of
+the vectors in S3: in memory by default, or in an Amazon S3 Vectors
+bucket when `MUNINN_VECTOR_BUCKET` is set. Either way it is refilled from
+S3 on every start.
 
 ## Storage
 
@@ -118,19 +121,31 @@ downloads them at build time so containers start offline.
 ```rust
 trait VectorIndex {
     async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> Result<()>;
+    async fn upsert_many(&self, items: Vec<(Uuid, Uuid, Vec<f32>)>) -> Result<()>;
     async fn search(&self, project: Uuid, query: &[f32], k: usize) -> Result<Vec<(Uuid, f32)>>;
 }
 ```
 
-v1 is a `HashMap<projectId, HashMap<id, vector>>` behind an `RwLock` with
-brute-force dot products. It is good to low tens of thousands of datapoints
-per project. Time filtering happens in recall, not in the index, which is
-why recall over-fetches.
+Time filtering happens in recall, not in the index, which is why recall
+over-fetches.
 
-Amazon S3 Vectors is the intended production implementation. LocalStack
-does not emulate it, so it is not in v1. When it lands, `timestamp` will
-be stored as filterable metadata so time filtering can move into the
-index.
+**In-memory** (default): a `HashMap<projectId, HashMap<id, vector>>`
+behind an `RwLock` with brute-force dot products. Good to low tens of
+thousands of datapoints per project.
+
+**Amazon S3 Vectors** (when `MUNINN_VECTOR_BUCKET` is set):
+
+- One index per embedding model, named `muninn-<model>` with characters
+  other than letters, digits and hyphens turned into `-`. Switching models
+  starts a fresh index; the old one is left unused.
+- Startup creates the vector bucket and index if missing (float32, cosine,
+  the model's dimension), and fails if an existing index has another
+  dimension.
+- Vectors are keyed by datapoint id with filterable metadata `projectId`.
+  Search filters on it and reports `1 - cosine distance` as the score.
+- LocalStack does not emulate S3 Vectors, so this backend needs real AWS.
+  `AWS_ENDPOINT_URL` redirects every AWS client, so with S3 Vectors the
+  S3 bucket must be on real AWS too.
 
 ## Startup
 
@@ -140,9 +155,10 @@ index.
 2. Load the embedding model or fail. With `MUNINN_DOWNLOAD_ONLY=1`, exit
    here; the Docker build uses this to bake the model into the image.
 3. Create the S3 client (path-style when an endpoint override is set) and
-   the bucket if missing.
+   the bucket if missing. With `MUNINN_VECTOR_BUCKET`, create the vector
+   bucket and index if missing.
 4. Start serving, and in the background scan every `meta.json` into the
-   index. Datapoints embedded by another model are re-embedded from their
+   index, 500 vectors per call. Datapoints embedded by another model are re-embedded from their
    content and their `meta.json` rewritten. A `meta.json` that does not
    parse, or whose content is missing when it needs re-embedding, is
    logged and skipped. `/healthz` reports `loading` and ingest/recall return
@@ -164,8 +180,9 @@ index.
 
 ## Known limits
 
-- One process owns the index. Two instances would each need to rebuild
-  from S3 and would not see each other's writes until restart.
+- With the in-memory index, one process owns the index. Two instances
+  would each need to rebuild from S3 and would not see each other's
+  writes until restart. With S3 Vectors they share it.
 - Idempotency across two processes on an S3 that ignores conditional puts
   is best effort.
 - Long documents are searchable by their first 512 tokens unless `bge-m3`

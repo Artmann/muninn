@@ -13,6 +13,9 @@ pub struct Config {
     pub embed_model: ModelChoice,
     pub model_cache: PathBuf,
     pub endpoint_url: Option<String>,
+    /// Amazon S3 Vectors bucket. When set, the index lives there instead
+    /// of in memory.
+    pub vector_bucket: Option<String>,
 }
 
 impl Config {
@@ -35,6 +38,9 @@ impl Config {
                 .context("MUNINN_EMBED_MODEL")?,
             model_cache: PathBuf::from(get("MUNINN_MODEL_CACHE").unwrap_or("./.fastembed_cache")),
             endpoint_url: get("AWS_ENDPOINT_URL").map(str::to_string),
+            vector_bucket: get("MUNINN_VECTOR_BUCKET")
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string),
         })
     }
 }
@@ -53,6 +59,18 @@ mod tests {
         assert_eq!(c.embed_model.name(), "multilingual-e5-small");
         assert_eq!(c.model_cache, PathBuf::from("./.fastembed_cache"));
         assert_eq!(c.endpoint_url, None);
+        assert_eq!(c.vector_bucket, None);
+    }
+
+    #[test]
+    fn vector_bucket_set_or_blank() {
+        let set = HashMap::from([("MUNINN_VECTOR_BUCKET".into(), "vecs".into())]);
+        assert_eq!(
+            Config::from_map(&set).unwrap().vector_bucket.as_deref(),
+            Some("vecs")
+        );
+        let blank = HashMap::from([("MUNINN_VECTOR_BUCKET".into(), " ".into())]);
+        assert_eq!(Config::from_map(&blank).unwrap().vector_bucket, None);
     }
 
     #[test]

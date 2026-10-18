@@ -93,17 +93,23 @@ impl S3Store {
         S3Store { client, bucket }
     }
 
-    pub async fn from_config(cfg: &Config) -> anyhow::Result<S3Store> {
+    /// Shared AWS SDK config, failing clearly when no region is set.
+    pub async fn load_sdk() -> anyhow::Result<aws_config::SdkConfig> {
         let sdk = aws_config::load_defaults(BehaviorVersion::latest()).await;
         require_region(sdk.region())?;
-        let mut builder = aws_sdk_s3::config::Builder::from(&sdk);
+        Ok(sdk)
+    }
+
+    pub async fn from_config(cfg: &Config) -> anyhow::Result<S3Store> {
+        Ok(S3Store::from_sdk(&S3Store::load_sdk().await?, cfg))
+    }
+
+    pub fn from_sdk(sdk: &aws_config::SdkConfig, cfg: &Config) -> S3Store {
+        let mut builder = aws_sdk_s3::config::Builder::from(sdk);
         if let Some(url) = &cfg.endpoint_url {
             builder = builder.endpoint_url(url).force_path_style(true);
         }
-        Ok(S3Store::new(
-            Client::from_conf(builder.build()),
-            cfg.bucket.clone(),
-        ))
+        S3Store::new(Client::from_conf(builder.build()), cfg.bucket.clone())
     }
 
     pub async fn ensure_bucket(&self) -> anyhow::Result<()> {

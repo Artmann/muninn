@@ -6,8 +6,9 @@ use muninn::api::AppState;
 use muninn::api::locks::KeyLocks;
 use muninn::boot;
 use muninn::config::Config;
+use muninn::embed::Embedder;
 use muninn::embed::FastEmbedder;
-use muninn::index::MemoryIndex;
+use muninn::index::{MemoryIndex, S3VectorsIndex, VectorIndex};
 use muninn::store::S3Store;
 use tracing_subscriber::EnvFilter;
 
@@ -36,12 +37,28 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let store = S3Store::from_config(&config).await?;
+    let sdk = S3Store::load_sdk().await?;
+    let store = S3Store::from_sdk(&sdk, &config);
     store.ensure_bucket().await?;
+
+    let index: Arc<dyn VectorIndex> = match &config.vector_bucket {
+        Some(bucket) => {
+            let idx = S3VectorsIndex::connect(
+                &sdk,
+                bucket.clone(),
+                embedder.model_name(),
+                embedder.dim(),
+            )
+            .await?;
+            tracing::info!(bucket, index = idx.index(), "using S3 Vectors index");
+            Arc::new(idx)
+        }
+        None => Arc::new(MemoryIndex::new()),
+    };
 
     let state = AppState {
         store,
-        index: Arc::new(MemoryIndex::new()),
+        index,
         embedder: Arc::new(embedder),
         ready: Arc::new(AtomicBool::new(false)),
         locks: KeyLocks::default(),

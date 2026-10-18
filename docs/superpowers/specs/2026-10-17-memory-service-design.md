@@ -19,9 +19,10 @@ the same or other agents as things happen.
   API.
 - Ingest is idempotent on a caller-supplied key.
 - Recall is semantic search with a relevance-ordered, budget-fitted result.
-- Vector search is behind a trait. First implementation is in-memory and is
-  rebuilt from S3 on startup. S3 Vectors is the intended second
-  implementation; nothing in the API may depend on the in-memory one.
+- Vector search is behind a trait. The default implementation is in-memory
+  and is rebuilt from S3 on startup. Amazon S3 Vectors is the second,
+  chosen by setting `MUNINN_VECTOR_BUCKET`; nothing in the API depends on
+  which one runs.
 
 ## Non-goals (for now)
 
@@ -192,8 +193,8 @@ The model's name and dimension are stored in every `meta.json`. On
 startup, any datapoint whose stored model differs from the configured one
 is re-embedded and rewritten, so switching models is a config change plus a
 slow first start, not a migration. The in-memory index holds vectors of
-one dimension per process; the S3 Vectors implementation later will need
-one index per model.
+one dimension per process; the S3 Vectors implementation uses one index
+per model.
 
 ### Query and passage prefixes
 
@@ -242,7 +243,8 @@ query prefix.
 ```rust
 trait VectorIndex {
     async fn upsert(&self, project: Uuid, id: Uuid, vector: Vec<f32>) -> Result<()>;
-    async fn search(&self, project: Uuid, query: Vec<f32>, k: usize) -> Result<Vec<(Uuid, f32)>>;
+    async fn upsert_many(&self, items: Vec<(Uuid, Uuid, Vec<f32>)>) -> Result<()>; // default: loop
+    async fn search(&self, project: Uuid, query: &[f32], k: usize) -> Result<Vec<(Uuid, f32)>>;
 }
 ```
 
@@ -258,6 +260,48 @@ service does not accept ingest or recall requests until the load is
 complete; the health endpoint reports `loading` until then. Fine up to low
 tens of thousands of datapoints per project. Beyond that is what S3
 Vectors is for.
+
+### S3 Vectors implementation
+
+Used when `MUNINN_VECTOR_BUCKET` is set. S3 still holds all documents;
+the vector bucket holds only the search index.
+
+- Index name: `muninn-` plus the model name, lowercased, with anything
+  other than letters, digits and hyphens replaced by `-` (for example
+  `muninn-multilingual-e5-small`). One index per model, so a model switch
+  starts a fresh index and leaves the old one unused.
+- On startup the vector bucket and index are created if missing (float32,
+  cosine, the model's dimension). An existing index with a different
+  dimension is a startup error.
+- Each vector is keyed by datapoint id with filterable metadata
+  `projectId`. Search filters on `projectId`, pages through results until
+  it has `k`, and reports `1 - distance` as the score.
+- The startup scan still runs and re-puts every vector in batches of 500.
+  Puts are idempotent, so this repairs any vector a crash left out and
+  keeps S3 the single source of truth.
+- LocalStack does not emulate S3 Vectors. Its tests run against real AWS
+  and are skipped unless `MUNINN_TEST_VECTOR_BUCKET` is set.
+
+### S3 Vectors implementation
+
+Used when `MUNINN_VECTOR_BUCKET` is set. S3 still holds all documents;
+the vector bucket holds only the search index.
+
+- Index name: `muninn-` plus the model name, lowercased, with anything
+  other than letters, digits and hyphens replaced by `-` (for example
+  `muninn-multilingual-e5-small`). One index per model, so a model switch
+  starts a fresh index and leaves the old one unused.
+- On startup the vector bucket and index are created if missing (float32,
+  cosine, the model's dimension). An existing index with a different
+  dimension is a startup error.
+- Each vector is keyed by datapoint id with filterable metadata
+  `projectId`. Search filters on `projectId`, pages through results until
+  it has `k`, and reports `1 - distance` as the score.
+- The startup scan still runs and re-puts every vector in batches of 500.
+  Puts are idempotent, so this repairs any vector a crash left out and
+  keeps S3 the single source of truth.
+- LocalStack does not emulate S3 Vectors. Its tests run against real AWS
+  and are skipped unless `MUNINN_TEST_VECTOR_BUCKET` is set.
 
 ## Ingest
 
@@ -417,6 +461,7 @@ src/embed.rs         Embedder trait + fastembed impl
 src/store.rs         S3 document store (content, meta, idempotency)
 src/index/mod.rs     VectorIndex trait
 src/index/memory.rs  in-memory impl
+src/index/s3vectors.rs  Amazon S3 Vectors impl
 src/recall.rs        the recall algorithm, pure over loaded metas (unit-testable)
 src/tokens.rs        token counting
 ```
@@ -444,9 +489,9 @@ src/tokens.rs        token counting
 ## Open for later
 
 - `audience` semantics.
-- S3 Vectors implementation of `VectorIndex`, which will need to carry
-  `timestamp` as filterable metadata so time filtering can move into the
-  index.
+- Carrying `timestamp` as filterable S3 Vectors metadata so time
+  filtering can move into the index. The startup re-put means adding it
+  needs no migration.
 - Update and delete.
 - Chunking long content into several vectors per datapoint, with recall
   merging hits back to one document.

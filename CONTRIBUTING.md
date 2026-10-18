@@ -60,6 +60,16 @@ because it downloads a second model (`bge-small-en-v1.5`, about 130 MB);
 run it with `cargo test --test e2e_model_switch -- --ignored`. A plain
 `cargo test -- --ignored` includes it.
 
+`s3vectors` runs against real Amazon S3 Vectors, since LocalStack does
+not emulate it. It skips itself unless `MUNINN_TEST_VECTOR_BUCKET` is set.
+With real AWS credentials and region (and no `AWS_ENDPOINT_URL`):
+
+```sh
+MUNINN_TEST_VECTOR_BUCKET=muninn-dev-vectors cargo test --test s3vectors -- --ignored
+```
+
+It creates a throwaway index in that bucket and deletes it afterwards.
+
 If `cargo run` is holding `target/debug/muninn.exe` on Windows, the build
 can't replace it; stop the server or use `CARGO_TARGET_DIR=target/e2e`.
 
@@ -87,6 +97,7 @@ src/embed.rs         Embedder trait + fastembed impl
 src/store.rs         S3 document store (content, meta, idempotency)
 src/index/mod.rs     VectorIndex trait
 src/index/memory.rs  in-memory impl
+src/index/s3vectors.rs  Amazon S3 Vectors impl
 src/recall.rs        the recall algorithm, pure over loaded metas
 src/tokens.rs        token counting
 ```

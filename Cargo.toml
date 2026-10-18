@@ -9,7 +9,9 @@ anyhow = "1"
 async-trait = "0.1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
+aws-sdk-s3vectors = "1"
 aws-smithy-runtime-api = "1"
+aws-smithy-types = "1"
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15.7"

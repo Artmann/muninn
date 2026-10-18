@@ -8,6 +8,9 @@ use crate::index::VectorIndex;
 use crate::store::S3Store;
 use crate::tokens::count_tokens;
 
+/// Vectors handed to the index per call during a rebuild.
+const BATCH: usize = 500;
+
 /// Load every stored datapoint into the index. Datapoints embedded with a
 /// different model are re-embedded and their `meta.json` rewritten.
 /// Returns how many datapoints were loaded.
@@ -20,6 +23,7 @@ pub async fn rebuild_index(
     let total = metas.len();
     let mut loaded = 0;
     let mut reembedded = 0;
+    let mut batch = Vec::with_capacity(BATCH);
     for mut meta in metas {
         if meta.embedding.model != embedder.model_name() {
             let Some(content) = store.get_content(meta.project_id, meta.id).await? else {
@@ -30,11 +34,13 @@ pub async fn rebuild_index(
             store.put_meta(&meta).await?;
             reembedded += 1;
         }
-        index
-            .upsert(meta.project_id, meta.id, meta.embedding.vector)
-            .await?;
+        batch.push((meta.project_id, meta.id, meta.embedding.vector));
+        if batch.len() == BATCH {
+            index.upsert_many(std::mem::take(&mut batch)).await?;
+        }
         loaded += 1;
     }
+    index.upsert_many(batch).await?;
     tracing::info!(total, loaded, reembedded, "index rebuilt");
     Ok(loaded)
 }
