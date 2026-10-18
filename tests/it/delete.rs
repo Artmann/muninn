@@ -43,7 +43,7 @@ async fn delete_by_source_id_and_id() {
     assert!(r[2].get("sourceId").is_none());
 
     assert_eq!(common::index_len(&state, p).await, 1);
-    let id = muninn::domain::source_uuid(p, "crm-1");
+    let id = muninn::datapoints::source_uuid(p, "crm-1");
     assert!(state.store.get_meta(p, id).await.unwrap().is_none());
     assert!(state.store.get_content(p, id).await.unwrap().is_none());
 

@@ -7,8 +7,7 @@ use std::sync::atomic::AtomicBool;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use muninn::api::locks::KeyLocks;
-use muninn::api::state::AppState;
+use muninn::app::{Infra, Services};
 use muninn::config::Config;
 use muninn::embed::FakeEmbedder;
 use muninn::index::MemoryIndex;
@@ -56,17 +55,15 @@ pub fn project() -> Uuid {
 }
 
 /// The full router over a fresh bucket, a fake embedder and an in-memory
-/// index, marked ready.
-pub async fn app() -> (axum::Router, AppState) {
-    let state = AppState {
+/// index, marked ready, and the infrastructure behind it.
+pub async fn app() -> (axum::Router, Infra) {
+    let infra = Infra {
         store: store().await,
         index: Arc::new(MemoryIndex::new()),
         embedder: Arc::new(FakeEmbedder::new(64)),
         ready: Arc::new(AtomicBool::new(true)),
-        locks: KeyLocks::default(),
-        webhook_rate: Default::default(),
     };
-    (muninn::api::router(state.clone()), state)
+    (muninn::http::router(Services::new(infra.clone())), infra)
 }
 
 pub async fn post(router: &axum::Router, path: &str, body: Value) -> (StatusCode, Value) {
@@ -120,7 +117,7 @@ async fn send(router: &axum::Router, req: Request<Body>) -> (StatusCode, Value) 
 }
 
 /// How many vectors the index holds for a project.
-pub async fn index_len(state: &AppState, project: Uuid) -> usize {
+pub async fn index_len(state: &Infra, project: Uuid) -> usize {
     let probe = vec![0.0; state.embedder.dim()];
     state
         .index

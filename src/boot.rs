@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
-use crate::domain::{Meta, StoredEmbedding, content_hash};
+use crate::datapoints::{Meta, StoredEmbedding, content_hash};
 use crate::embed::{Embedder, build_input};
 use crate::index::VectorIndex;
 use crate::store::S3Store;

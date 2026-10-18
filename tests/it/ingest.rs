@@ -2,7 +2,7 @@ use crate::common;
 use std::sync::atomic::Ordering;
 
 use axum::http::StatusCode;
-use muninn::domain::NewDatapoint;
+use muninn::datapoints::NewDatapoint;
 use muninn::store::MarkerOutcome;
 use serde_json::json;
 use uuid::Uuid;
@@ -327,11 +327,11 @@ async fn dedupe_restores_missing_index_entry() {
 
     // Same S3 data, but the index lost the entry (request cancelled after
     // meta.json was written, before the index upsert).
-    let fresh = muninn::api::AppState {
+    let fresh = muninn::app::Infra {
         index: std::sync::Arc::new(muninn::index::MemoryIndex::new()),
         ..state.clone()
     };
-    let app2 = muninn::api::router(fresh.clone());
+    let app2 = muninn::http::router(muninn::app::Services::new(fresh.clone()));
     let (status, resp) = common::post(&app2, "/api/v1/ingest", body).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["deduplicated"], true);
@@ -399,7 +399,7 @@ async fn source_id_creates_then_dedupes_identical_resend() {
     assert_eq!(b1["sourceId"], "crm-1");
     assert_eq!(b1["replaced"], false);
     let id: Uuid = b1["id"].as_str().unwrap().parse().unwrap();
-    assert_eq!(id, muninn::domain::source_uuid(p, "crm-1"));
+    assert_eq!(id, muninn::datapoints::source_uuid(p, "crm-1"));
 
     let (s2, b2) = common::post(&app, "/api/v1/ingest", body).await;
     assert_eq!(s2, StatusCode::OK, "{b2}");
@@ -536,7 +536,7 @@ async fn batch_with_source_ids_upserts_and_checks_labels_up_front() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"]["details"][0]["index"], 1);
-    let id = muninn::domain::source_uuid(p, "a");
+    let id = muninn::datapoints::source_uuid(p, "a");
     assert_eq!(
         state.store.get_content(p, id).await.unwrap().as_deref(),
         Some("two"),

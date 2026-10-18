@@ -1,6 +1,6 @@
 use crate::common;
 use chrono::Utc;
-use muninn::domain::{Meta, StoredEmbedding};
+use muninn::datapoints::{Meta, StoredEmbedding};
 use muninn::store::MarkerOutcome;
 use uuid::Uuid;
 
